@@ -1097,6 +1097,15 @@ void RENDER_3D_OPENGL::get3dModelsFromFootprint( std::list<MODELTORENDER> &aDstR
 
         glm::mat4 fpMatrix( 1.0f );
 
+        // Apply multi-PCB transform if enabled
+        if( m_boardAdapter.HasMultiPcbTransforms() )
+        {
+            int areaIdx = m_boardAdapter.GetMultiPcbAreaIndex( pos );
+
+            if( areaIdx >= 0 )
+                fpMatrix = m_boardAdapter.GetMultiPcbTransformMatrix( areaIdx );
+        }
+
         fpMatrix = glm::translate( fpMatrix, SFVEC3F( pos.x * m_boardAdapter.BiuTo3dUnits(),
                                                       -pos.y * m_boardAdapter.BiuTo3dUnits(),
                                                       zpos ) );

@@ -50,6 +50,7 @@
 #include <footprint.h>
 #include <reporter.h>
 #include <dialogs/dialog_color_picker.h>
+#include "multi_pcb_transform.h"
 
 class COLOR_SETTINGS;
 class PCB_TEXTBOX;
@@ -544,6 +545,42 @@ public:
     std::map<int, COLOR4D> m_ColorOverrides;  ///< allows to override color scheme colors
     std::map<int, COLOR4D> m_BoardEditorColors; ///< list of colors used by the board editor
 
+    /**
+     * Get the list of multi-PCB transform areas parsed from the board.
+     */
+    const std::vector<MULTI_PCB_AREA>& GetMultiPcbAreas() const { return m_multiPcbAreas; }
+
+    /**
+     * Check if multi-PCB transforms are enabled and available.
+     */
+    bool HasMultiPcbTransforms() const
+    {
+        return m_Cfg && m_Cfg->m_Render.apply_multi_pcb_transform && !m_multiPcbAreas.empty();
+    }
+
+    /**
+     * Find which multi-PCB area a board position (in BIU) belongs to.
+     * @return index into GetMultiPcbAreas(), or -1 if not in any area
+     */
+    int GetMultiPcbAreaIndex( const VECTOR2I& aPos ) const
+    {
+        return FindMultiPcbArea( m_multiPcbAreas, aPos );
+    }
+
+    /**
+     * Get the pre-computed transform matrix for an area index.
+     * @return the transform matrix, or identity if index is invalid
+     */
+    const glm::mat4& GetMultiPcbTransformMatrix( int aAreaIndex ) const
+    {
+        static const glm::mat4 identity( 1.0f );
+
+        if( aAreaIndex >= 0 && aAreaIndex < (int)m_multiPcbTransformMatrices.size() )
+            return m_multiPcbTransformMatrices[aAreaIndex];
+
+        return identity;
+    }
+
 private:
     BOARD*            m_board;
     S3D_CACHE*        m_3dModelManager;
@@ -627,6 +664,9 @@ private:
      * wxWidgets documentation on wxLogTrace for more information.
      */
     static const wxChar* m_logTrace;
+
+    std::vector<MULTI_PCB_AREA> m_multiPcbAreas;
+    std::vector<glm::mat4>      m_multiPcbTransformMatrices;
 
 };
 

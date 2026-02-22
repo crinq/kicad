@@ -27,6 +27,7 @@ set(3D-VIEWER_SRCS
     3d_cache/3d_cache.cpp
     3d_cache/3d_plugin_manager.cpp
     3d_canvas/board_adapter.cpp
+    3d_canvas/multi_pcb_transform.cpp
     3d_canvas/create_layer_items.cpp
     3d_canvas/create_3Dgraphic_brd_items.cpp
     3d_canvas/eda_3d_canvas.cpp

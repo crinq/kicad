@@ -600,6 +600,21 @@ void BOARD_ADAPTER::InitSettings( REPORTER* aStatusReporter, REPORTER* aWarningR
 
     for( int layer = LAYER_3D_USER_1; layer <= LAYER_3D_USER_45; ++layer )
         m_UserDefinedLayerColor[ layer - LAYER_3D_USER_1 ] = to_SFVEC4F( colors[ layer ] );
+
+    // Scan for multi-PCB transform areas
+    m_multiPcbAreas.clear();
+    m_multiPcbTransformMatrices.clear();
+
+    if( m_board && m_Cfg && m_Cfg->m_Render.apply_multi_pcb_transform )
+    {
+        m_multiPcbAreas = ScanMultiPcbAreas( m_board );
+
+        for( const MULTI_PCB_AREA& area : m_multiPcbAreas )
+        {
+            m_multiPcbTransformMatrices.push_back(
+                    BuildTransformMatrix( area.transform, m_biuTo3Dunits ) );
+        }
+    }
 }
 
 

@@ -198,8 +198,25 @@ APPEARANCE_CONTROLS_3D::APPEARANCE_CONTROLS_3D( EDA_3D_VIEWER_FRAME* aParent, wx
                 m_frame->NewDisplay( true );
             } );
 
+    m_cbApplyMultiPcbTransform = new wxCheckBox( m_panelLayers, wxID_ANY,
+                                                  _( "Apply multi-PCB transforms" ) );
+    m_cbApplyMultiPcbTransform->SetFont( infoFont );
+    m_cbApplyMultiPcbTransform->SetToolTip( _( "Apply spatial transforms to sub-PCBs defined by "
+                                                "'transform' zones on User.Comments layer" ) );
+
+    m_cbApplyMultiPcbTransform->Bind( wxEVT_CHECKBOX,
+            [this]( wxCommandEvent& aEvent )
+            {
+                EDA_3D_VIEWER_SETTINGS* cfg = m_frame->GetAdapter().m_Cfg;
+                cfg->m_Render.apply_multi_pcb_transform = aEvent.IsChecked();
+
+                m_frame->NewDisplay( true );
+            } );
+
     m_panelLayersSizer->Add( m_cbUseBoardStackupColors, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 5 );
     m_panelLayersSizer->Add( m_cbUseBoardEditorCopperColors, 0,
+                             wxEXPAND | wxLEFT | wxRIGHT, 5 );
+    m_panelLayersSizer->Add( m_cbApplyMultiPcbTransform, 0,
                              wxEXPAND | wxALL, 5 );
 
     m_cbLayerPresets->SetToolTip( wxString::Format( _( "Save and restore color and visibility combinations.\n"
@@ -706,6 +723,7 @@ void APPEARANCE_CONTROLS_3D::UpdateLayerCtls()
     {
         m_cbUseBoardStackupColors->SetValue( cfg->m_UseStackupColors );
         m_cbUseBoardEditorCopperColors->SetValue( cfg->m_Render.use_board_editor_copper_colors );
+        m_cbApplyMultiPcbTransform->SetValue( cfg->m_Render.apply_multi_pcb_transform );
     }
 }
 
