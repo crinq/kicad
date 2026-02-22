@@ -613,7 +613,8 @@ void BOARD_ADAPTER::InitSettings( REPORTER* aStatusReporter, REPORTER* aWarningR
         for( const MULTI_PCB_AREA& area : m_multiPcbAreas )
         {
             m_multiPcbTransformMatrices.push_back(
-                    BuildTransformMatrix( area.transform, m_biuTo3Dunits, factor ) );
+                    BuildTransformMatrix( area.transform, m_biuTo3Dunits, factor,
+                                          area.rotationCenter ) );
         }
     }
 }

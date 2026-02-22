@@ -201,6 +201,7 @@ std::vector<MULTI_PCB_AREA> ScanMultiPcbAreas( const BOARD* aBoard )
             {
                 if( ParseMultiPcbTransform( textContent, area.transform ) )
                 {
+                    area.rotationCenter = textPos;
                     foundTransform = true;
                     break;
                 }
@@ -234,6 +235,7 @@ std::vector<MULTI_PCB_AREA> ScanMultiPcbAreas( const BOARD* aBoard )
                     {
                         if( ParseMultiPcbTransform( textContent, area.transform ) )
                         {
+                            area.rotationCenter = textPos;
                             foundTransform = true;
                             break;
                         }
@@ -244,6 +246,10 @@ std::vector<MULTI_PCB_AREA> ScanMultiPcbAreas( const BOARD* aBoard )
                     break;
             }
         }
+
+        // If no transform text found, use zone center as fallback rotation center
+        if( !foundTransform )
+            area.rotationCenter = area.center;
 
         // Only add the area if it has a non-identity transform or if we found a transform string
         // (identity transforms with an explicit "transform" zone are kept to allow areas without
@@ -256,7 +262,8 @@ std::vector<MULTI_PCB_AREA> ScanMultiPcbAreas( const BOARD* aBoard )
 
 
 glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
-                                double aBiuTo3Dunits )
+                                double aBiuTo3Dunits,
+                                const VECTOR2I& aRotationCenter )
 {
     if( aTransform.IsIdentity() )
         return glm::mat4( 1.0f );
@@ -269,10 +276,17 @@ glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
     float ty = (float)( -aTransform.y * PCB_IU_PER_MM * aBiuTo3Dunits );  // Y is inverted
     float tz = (float)( aTransform.z * PCB_IU_PER_MM * aBiuTo3Dunits );
 
-    // Apply translation
+    // Rotation center in 3D units (BIU to 3D, Y inverted)
+    float cx = (float)( aRotationCenter.x * aBiuTo3Dunits );
+    float cy = (float)( -aRotationCenter.y * aBiuTo3Dunits );
+
+    // Apply user translation
     mat = glm::translate( mat, glm::vec3( tx, ty, tz ) );
 
-    // Apply rotations: a around X, b around Y, c around Z
+    // Translate to rotation center
+    mat = glm::translate( mat, glm::vec3( cx, cy, 0.0f ) );
+
+    // Apply rotations: c around Z, b around Y, a around X
     if( aTransform.c != 0.0 )
         mat = glm::rotate( mat, glm::radians( (float)aTransform.c ), glm::vec3( 0.0f, 0.0f, 1.0f ) );
 
@@ -282,19 +296,23 @@ glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
     if( aTransform.a != 0.0 )
         mat = glm::rotate( mat, glm::radians( (float)aTransform.a ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
 
+    // Translate back from rotation center
+    mat = glm::translate( mat, glm::vec3( -cx, -cy, 0.0f ) );
+
     return mat;
 }
 
 
 glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
                                 double aBiuTo3Dunits,
-                                float aFactor )
+                                float aFactor,
+                                const VECTOR2I& aRotationCenter )
 {
     if( aFactor <= 0.0f || aTransform.IsIdentity() )
         return glm::mat4( 1.0f );
 
     if( aFactor >= 1.0f )
-        return BuildTransformMatrix( aTransform, aBiuTo3Dunits );
+        return BuildTransformMatrix( aTransform, aBiuTo3Dunits, aRotationCenter );
 
     MULTI_PCB_TRANSFORM_DATA interpolated;
     interpolated.x = aTransform.x * aFactor;
@@ -304,7 +322,7 @@ glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
     interpolated.b = aTransform.b * aFactor;
     interpolated.c = aTransform.c * aFactor;
 
-    return BuildTransformMatrix( interpolated, aBiuTo3Dunits );
+    return BuildTransformMatrix( interpolated, aBiuTo3Dunits, aRotationCenter );
 }
 
 

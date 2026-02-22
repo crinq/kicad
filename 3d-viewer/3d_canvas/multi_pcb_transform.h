@@ -73,10 +73,11 @@ struct MULTI_PCB_TRANSFORM_DATA
  */
 struct MULTI_PCB_AREA
 {
-    wxString                 name;       ///< Zone name
-    SHAPE_POLY_SET           outline;    ///< The zone outline polygon
-    MULTI_PCB_TRANSFORM_DATA transform;  ///< The parsed transform
-    VECTOR2I                 center;     ///< Center of the zone area (in BIU)
+    wxString                 name;             ///< Zone name
+    SHAPE_POLY_SET           outline;          ///< The zone outline polygon
+    MULTI_PCB_TRANSFORM_DATA transform;        ///< The parsed transform
+    VECTOR2I                 center;           ///< Center of the zone area (in BIU)
+    VECTOR2I                 rotationCenter;   ///< Rotation origin: text anchor pos (in BIU)
 
     /**
      * Check if a point (in BIU) is inside this area.
@@ -119,7 +120,8 @@ std::vector<MULTI_PCB_AREA> ScanMultiPcbAreas( const BOARD* aBoard );
  * @return the 4x4 transformation matrix
  */
 glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
-                                double aBiuTo3Dunits );
+                                double aBiuTo3Dunits,
+                                const VECTOR2I& aRotationCenter );
 
 /**
  * Build an interpolated 4x4 transformation matrix.
@@ -127,11 +129,13 @@ glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
  * @param aTransform the transform specification
  * @param aBiuTo3Dunits conversion factor from board internal units to 3D units
  * @param aFactor interpolation factor: 0.0 = identity, 1.0 = full transform
+ * @param aRotationCenter rotation origin in BIU (typically the transform text anchor)
  * @return the 4x4 transformation matrix
  */
 glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
                                 double aBiuTo3Dunits,
-                                float aFactor );
+                                float aFactor,
+                                const VECTOR2I& aRotationCenter );
 
 
 /**
