@@ -198,17 +198,22 @@ APPEARANCE_CONTROLS_3D::APPEARANCE_CONTROLS_3D( EDA_3D_VIEWER_FRAME* aParent, wx
                 m_frame->NewDisplay( true );
             } );
 
-    m_cbApplyMultiPcbTransform = new wxCheckBox( m_panelLayers, wxID_ANY,
-                                                  _( "Apply multi-PCB transforms" ) );
-    m_cbApplyMultiPcbTransform->SetFont( infoFont );
-    m_cbApplyMultiPcbTransform->SetToolTip( _( "Apply spatial transforms to sub-PCBs defined by "
-                                                "'transform' zones on User.Comments layer" ) );
+    m_labelMultiPcbTransform = new wxStaticText( m_panelLayers, wxID_ANY,
+                                                   _( "Multi-PCB transform:" ) );
+    m_labelMultiPcbTransform->SetFont( infoFont );
 
-    m_cbApplyMultiPcbTransform->Bind( wxEVT_CHECKBOX,
+    m_sliderMultiPcbTransform = new wxSlider( m_panelLayers, wxID_ANY, 0, 0, 100,
+                                               wxDefaultPosition, wxDefaultSize,
+                                               wxSL_HORIZONTAL );
+    m_sliderMultiPcbTransform->SetToolTip( _( "Interpolation factor for multi-PCB assembly "
+                                               "transforms.\n0% = flat layout, 100% = fully "
+                                               "assembled position." ) );
+
+    m_sliderMultiPcbTransform->Bind( wxEVT_SLIDER,
             [this]( wxCommandEvent& aEvent )
             {
                 EDA_3D_VIEWER_SETTINGS* cfg = m_frame->GetAdapter().m_Cfg;
-                cfg->m_Render.apply_multi_pcb_transform = aEvent.IsChecked();
+                cfg->m_Render.multi_pcb_transform_factor = aEvent.GetInt() / 100.0f;
 
                 m_frame->NewDisplay( true );
             } );
@@ -216,8 +221,10 @@ APPEARANCE_CONTROLS_3D::APPEARANCE_CONTROLS_3D( EDA_3D_VIEWER_FRAME* aParent, wx
     m_panelLayersSizer->Add( m_cbUseBoardStackupColors, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 5 );
     m_panelLayersSizer->Add( m_cbUseBoardEditorCopperColors, 0,
                              wxEXPAND | wxLEFT | wxRIGHT, 5 );
-    m_panelLayersSizer->Add( m_cbApplyMultiPcbTransform, 0,
-                             wxEXPAND | wxALL, 5 );
+    m_panelLayersSizer->Add( m_labelMultiPcbTransform, 0,
+                             wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 5 );
+    m_panelLayersSizer->Add( m_sliderMultiPcbTransform, 0,
+                             wxEXPAND | wxBOTTOM | wxLEFT | wxRIGHT, 5 );
 
     m_cbLayerPresets->SetToolTip( wxString::Format( _( "Save and restore color and visibility combinations.\n"
                                                        "Use %s+Tab to activate selector.\n"
@@ -723,7 +730,8 @@ void APPEARANCE_CONTROLS_3D::UpdateLayerCtls()
     {
         m_cbUseBoardStackupColors->SetValue( cfg->m_UseStackupColors );
         m_cbUseBoardEditorCopperColors->SetValue( cfg->m_Render.use_board_editor_copper_colors );
-        m_cbApplyMultiPcbTransform->SetValue( cfg->m_Render.apply_multi_pcb_transform );
+        m_sliderMultiPcbTransform->SetValue(
+                (int)( cfg->m_Render.multi_pcb_transform_factor * 100.0f ) );
     }
 }
 

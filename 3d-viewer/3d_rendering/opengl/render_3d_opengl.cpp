@@ -506,28 +506,63 @@ void RENDER_3D_OPENGL::renderBoardBody( bool aSkipRenderHoles )
 
     OglSetMaterial( m_materials.m_EpoxyBoard, 1.0f );
 
-    OPENGL_RENDER_LIST* ogl_disp_list = nullptr;
+    float boardThickness = m_boardAdapter.GetBoardBodyThickness();
 
-    if( aSkipRenderHoles )
-        ogl_disp_list = m_board;
-    else
-        ogl_disp_list = m_boardWithHoles;
-
-    if( ogl_disp_list )
+    if( m_hasPerAreaGeometry )
     {
-        ogl_disp_list->ApplyScalePosition( -m_boardAdapter.GetBoardBodyThickness() / 2.0f,
-                                           m_boardAdapter.GetBoardBodyThickness() );
+        const auto& areas = m_boardAdapter.GetMultiPcbAreas();
 
-        ogl_disp_list->SetItIsTransparent( true );
-        ogl_disp_list->DrawAll();
+        auto renderAreaBoard = [&]( int areaIdx )
+        {
+            auto& boardMap = aSkipRenderHoles ? m_areaBoard : m_areaBoardWithHoles;
+            auto it = boardMap.find( areaIdx );
+
+            if( it == boardMap.end() || !it->second )
+                return;
+
+            OPENGL_RENDER_LIST* board = it->second;
+
+            if( areaIdx >= 0 )
+            {
+                glPushMatrix();
+                glMultMatrixf( glm::value_ptr(
+                        m_boardAdapter.GetMultiPcbTransformMatrix( areaIdx ) ) );
+            }
+
+            board->ApplyScalePosition( -boardThickness / 2.0f, boardThickness );
+            board->SetItIsTransparent( true );
+            board->DrawAll();
+
+            if( areaIdx >= 0 )
+                glPopMatrix();
+        };
+
+        renderAreaBoard( -1 );
+
+        for( int i = 0; i < (int)areas.size(); i++ )
+            renderAreaBoard( i );
+    }
+    else
+    {
+        OPENGL_RENDER_LIST* ogl_disp_list = nullptr;
+
+        if( aSkipRenderHoles )
+            ogl_disp_list = m_board;
+        else
+            ogl_disp_list = m_boardWithHoles;
+
+        if( ogl_disp_list )
+        {
+            ogl_disp_list->ApplyScalePosition( -boardThickness / 2.0f, boardThickness );
+            ogl_disp_list->SetItIsTransparent( true );
+            ogl_disp_list->DrawAll();
+        }
     }
 
     // Also render post-machining plugs (board material that remains after backdrill/counterbore/countersink)
     if( !aSkipRenderHoles && m_postMachinePlugs )
     {
-        m_postMachinePlugs->ApplyScalePosition( -m_boardAdapter.GetBoardBodyThickness() / 2.0f,
-                                                m_boardAdapter.GetBoardBodyThickness() );
-
+        m_postMachinePlugs->ApplyScalePosition( -boardThickness / 2.0f, boardThickness );
         m_postMachinePlugs->SetItIsTransparent( true );
         m_postMachinePlugs->DrawAll();
     }
@@ -651,127 +686,310 @@ bool RENDER_3D_OPENGL::Redraw( bool aIsMoving, REPORTER* aStatusReporter,
 
     setLayerMaterial( B_Cu );
 
-    if( !( skipRenderMicroVias || skipRenderHoles ) && m_microviaHoles )
-        m_microviaHoles->DrawAll();
-
-    if( !skipRenderHoles && m_padHoles )
-        m_padHoles->DrawAll();
-
     // Display copper and tech layers
-    for( MAP_OGL_DISP_LISTS::const_iterator ii = m_layers.begin(); ii != m_layers.end(); ++ii )
+    if( m_hasPerAreaGeometry )
     {
-        const PCB_LAYER_ID layer = ( PCB_LAYER_ID )( ii->first );
-        bool  isSilkLayer = layer == F_SilkS || layer == B_SilkS;
-        bool  isMaskLayer = layer == F_Mask || layer == B_Mask;
-        bool  isPasteLayer = layer == F_Paste || layer == B_Paste;
+        // Render per-area layers with transforms
+        const auto& areas = m_boardAdapter.GetMultiPcbAreas();
 
-        // Mask layers are not processed here because they are a special case
-        if( isMaskLayer )
-            continue;
+        // Collect all area indices (-1 for non-area, then 0..N for each area)
+        std::vector<int> areaIndices;
+        areaIndices.push_back( -1 );
 
-        // Do not show inner layers when it is displaying the board and board body is opaque
-        // enough: the time to create inner layers can be *really significant*.
-        // So avoid creating them is they are not very visible
-        const double opacity_min = 0.8;
+        for( int i = 0; i < (int)areas.size(); i++ )
+            areaIndices.push_back( i );
 
-        if( layerFlags.test( LAYER_3D_BOARD ) && m_boardAdapter.m_BoardBodyColor.a > opacity_min )
+        for( int areaIdx : areaIndices )
         {
-            // generating internal copper layers is time consuming. so skip them
-            // if the board body is masking them (i.e. if the opacity is near 1.0)
-            // B_Cu is layer 2 and all inner layers are higher values
-            if( layer > B_Cu && IsCopperLayer( layer ) )
+            auto areaLayersIt = m_areaLayers.find( areaIdx );
+
+            bool hasAreaLayers = ( areaLayersIt != m_areaLayers.end() );
+
+            if( areaIdx >= 0 )
+            {
+                glPushMatrix();
+                glMultMatrixf( glm::value_ptr(
+                        m_boardAdapter.GetMultiPcbTransformMatrix( areaIdx ) ) );
+            }
+
+            // Draw per-area through-hole copper (barrels, plating)
+            {
+                auto microviaIt = m_areaMicroviaHoles.find( areaIdx );
+
+                if( !( skipRenderMicroVias || skipRenderHoles )
+                    && microviaIt != m_areaMicroviaHoles.end() && microviaIt->second )
+                {
+                    microviaIt->second->DrawAll();
+                }
+
+                auto padIt = m_areaPadHoles.find( areaIdx );
+
+                if( !skipRenderHoles && padIt != m_areaPadHoles.end() && padIt->second )
+                    padIt->second->DrawAll();
+            }
+
+            if( !hasAreaLayers )
+            {
+                if( areaIdx >= 0 )
+                    glPopMatrix();
+
                 continue;
+            }
+
+            OPENGL_RENDER_LIST* areaAnti = nullptr;
+            auto antiIt = m_areaAntiBoard.find( areaIdx );
+
+            if( antiIt != m_areaAntiBoard.end() )
+                areaAnti = antiIt->second;
+
+            // Get per-area through-hole mask for copper subtraction
+            OPENGL_RENDER_LIST* areaOuterTH = nullptr;
+            {
+                auto thIt = m_areaOuterThroughHoles.find( areaIdx );
+
+                if( thIt != m_areaOuterThroughHoles.end() )
+                    areaOuterTH = thIt->second;
+            }
+
+            for( auto& [layer, pLayerDispList] : areaLayersIt->second )
+            {
+                bool isSilkLayer = layer == F_SilkS || layer == B_SilkS;
+                bool isMaskLayer = layer == F_Mask || layer == B_Mask;
+
+                if( isMaskLayer )
+                    continue;
+
+                const double opacity_min = 0.8;
+
+                if( layerFlags.test( LAYER_3D_BOARD )
+                    && m_boardAdapter.m_BoardBodyColor.a > opacity_min )
+                {
+                    if( layer > B_Cu && IsCopperLayer( layer ) )
+                        continue;
+                }
+
+                glPushMatrix();
+
+                if( IsCopperLayer( layer ) )
+                {
+                    if( cfg.DifferentiatePlatedCopper() )
+                        setCopperMaterial();
+                    else
+                        setLayerMaterial( layer );
+
+                    OPENGL_RENDER_LIST* outerTH = nullptr;
+
+                    if( !skipRenderHoles )
+                        outerTH = areaOuterTH;
+
+                    if( areaAnti )
+                        areaAnti->ApplyScalePosition( pLayerDispList );
+
+                    if( outerTH )
+                        outerTH->ApplyScalePosition( pLayerDispList );
+
+                    pLayerDispList->DrawCulled( showThickness, outerTH, nullptr, areaAnti );
+
+                    // Draw plated pads for this area
+                    if( layer == F_Cu )
+                    {
+                        auto ppIt = m_areaPlatedPadsFront.find( areaIdx );
+
+                        if( ppIt != m_areaPlatedPadsFront.end() && ppIt->second )
+                        {
+                            setPlatedCopperAndDepthOffset( layer );
+                            ppIt->second->DrawCulled( showThickness, outerTH, nullptr,
+                                                      areaAnti );
+                        }
+                    }
+                    else if( layer == B_Cu )
+                    {
+                        auto ppIt = m_areaPlatedPadsBack.find( areaIdx );
+
+                        if( ppIt != m_areaPlatedPadsBack.end() && ppIt->second )
+                        {
+                            setPlatedCopperAndDepthOffset( layer );
+                            ppIt->second->DrawCulled( showThickness, outerTH, nullptr,
+                                                      areaAnti );
+                        }
+                    }
+
+                    unsetDepthOffset();
+                }
+                else
+                {
+                    setLayerMaterial( layer );
+
+                    OPENGL_RENDER_LIST* throughHolesOuter = nullptr;
+                    OPENGL_RENDER_LIST* anti_board = nullptr;
+                    OPENGL_RENDER_LIST* solder_mask = nullptr;
+
+                    if( !skipRenderHoles )
+                    {
+                        if( isSilkLayer && cfg.clip_silk_on_via_annuli
+                            && m_outerThroughHoleRings )
+                            throughHolesOuter = m_outerThroughHoleRings;
+                        else
+                            throughHolesOuter = m_outerThroughHoles;
+                    }
+
+                    if( isSilkLayer && cfg.show_off_board_silk )
+                        anti_board = nullptr;
+                    else if( LSET::PhysicalLayersMask().test( layer ) )
+                        anti_board = areaAnti;
+
+                    if( isSilkLayer && cfg.subtract_mask_from_silk && !cfg.show_off_board_silk )
+                    {
+                        auto maskLayersIt = areaLayersIt->second.find(
+                                ( layer == B_SilkS ) ? B_Mask : F_Mask );
+
+                        if( maskLayersIt != areaLayersIt->second.end() )
+                            solder_mask = maskLayersIt->second;
+                    }
+
+                    if( throughHolesOuter )
+                        throughHolesOuter->ApplyScalePosition( pLayerDispList );
+
+                    if( anti_board )
+                        anti_board->ApplyScalePosition( pLayerDispList );
+
+                    if( solder_mask )
+                        solder_mask->ApplyScalePosition( pLayerDispList );
+
+                    pLayerDispList->DrawCulled( showThickness, solder_mask, throughHolesOuter,
+                                                anti_board );
+                }
+
+                glPopMatrix();
+            }
+
+            if( areaIdx >= 0 )
+                glPopMatrix();
         }
+    }
+    else
+    {
+        if( !( skipRenderMicroVias || skipRenderHoles ) && m_microviaHoles )
+            m_microviaHoles->DrawAll();
 
-        glPushMatrix();
+        if( !skipRenderHoles && m_padHoles )
+            m_padHoles->DrawAll();
 
-        OPENGL_RENDER_LIST* pLayerDispList = static_cast<OPENGL_RENDER_LIST*>( ii->second );
-
-        if( IsCopperLayer( layer ) )
+        for( MAP_OGL_DISP_LISTS::const_iterator ii = m_layers.begin(); ii != m_layers.end(); ++ii )
         {
-            if( cfg.DifferentiatePlatedCopper() )
-                setCopperMaterial();
+            const PCB_LAYER_ID layer = ( PCB_LAYER_ID )( ii->first );
+            bool  isSilkLayer = layer == F_SilkS || layer == B_SilkS;
+            bool  isMaskLayer = layer == F_Mask || layer == B_Mask;
+            bool  isPasteLayer = layer == F_Paste || layer == B_Paste;
+
+            // Mask layers are not processed here because they are a special case
+            if( isMaskLayer )
+                continue;
+
+            // Do not show inner layers when it is displaying the board and board body is opaque
+            // enough: the time to create inner layers can be *really significant*.
+            // So avoid creating them is they are not very visible
+            const double opacity_min = 0.8;
+
+            if( layerFlags.test( LAYER_3D_BOARD ) && m_boardAdapter.m_BoardBodyColor.a > opacity_min )
+            {
+                // generating internal copper layers is time consuming. so skip them
+                // if the board body is masking them (i.e. if the opacity is near 1.0)
+                // B_Cu is layer 2 and all inner layers are higher values
+                if( layer > B_Cu && IsCopperLayer( layer ) )
+                    continue;
+            }
+
+            glPushMatrix();
+
+            OPENGL_RENDER_LIST* pLayerDispList = static_cast<OPENGL_RENDER_LIST*>( ii->second );
+
+            if( IsCopperLayer( layer ) )
+            {
+                if( cfg.DifferentiatePlatedCopper() )
+                    setCopperMaterial();
+                else
+                    setLayerMaterial( layer );
+
+                OPENGL_RENDER_LIST* outerTH = nullptr;
+                OPENGL_RENDER_LIST* viaHoles = nullptr;
+
+                if( !skipRenderHoles )
+                {
+                    outerTH = m_outerThroughHoles;
+                    viaHoles = m_outerLayerHoles[layer];
+                }
+
+                if( m_antiBoard )
+                    m_antiBoard->ApplyScalePosition( pLayerDispList );
+
+                if( outerTH )
+                    outerTH->ApplyScalePosition( pLayerDispList );
+
+                pLayerDispList->DrawCulled( showThickness, outerTH, viaHoles, m_antiBoard );
+
+                // Draw plated & offboard pads
+                if( layer == F_Cu && ( m_platedPadsFront || m_offboardPadsFront ) )
+                {
+                    setPlatedCopperAndDepthOffset( layer );
+
+                    if( m_platedPadsFront )
+                        m_platedPadsFront->DrawCulled( showThickness, outerTH, viaHoles, m_antiBoard );
+
+                    if( m_offboardPadsFront )
+                        m_offboardPadsFront->DrawCulled( showThickness, outerTH, viaHoles );
+                }
+                else if( layer == B_Cu && ( m_platedPadsBack || m_offboardPadsBack ) )
+                {
+                    setPlatedCopperAndDepthOffset( layer );
+
+                    if( m_platedPadsBack )
+                        m_platedPadsBack->DrawCulled( showThickness, outerTH, viaHoles, m_antiBoard );
+
+                    if( m_offboardPadsBack )
+                        m_offboardPadsBack->DrawCulled( showThickness, outerTH, viaHoles );
+                }
+
+                unsetDepthOffset();
+            }
             else
+            {
                 setLayerMaterial( layer );
 
-            OPENGL_RENDER_LIST* outerTH = nullptr;
-            OPENGL_RENDER_LIST* viaHoles = nullptr;
+                OPENGL_RENDER_LIST* throughHolesOuter = nullptr;
+                OPENGL_RENDER_LIST* anti_board = nullptr;
+                OPENGL_RENDER_LIST* solder_mask = nullptr;
 
-            if( !skipRenderHoles )
-            {
-                outerTH = m_outerThroughHoles;
-                viaHoles = m_outerLayerHoles[layer];
+                if( !skipRenderHoles )
+                {
+                    if( isSilkLayer && cfg.clip_silk_on_via_annuli )
+                        throughHolesOuter = m_outerThroughHoleRings;
+                    else
+                        throughHolesOuter = m_outerThroughHoles;
+                }
+
+                if( isSilkLayer && cfg.show_off_board_silk )
+                    anti_board = nullptr;
+                else if( LSET::PhysicalLayersMask().test( layer ) )
+                    anti_board = m_antiBoard;
+
+                if( isSilkLayer && cfg.subtract_mask_from_silk && !cfg.show_off_board_silk )
+                    solder_mask = m_layers[ ( layer == B_SilkS) ? B_Mask : F_Mask ];
+
+                if( throughHolesOuter )
+                    throughHolesOuter->ApplyScalePosition( pLayerDispList );
+
+                if( anti_board )
+                    anti_board->ApplyScalePosition( pLayerDispList );
+
+                if( solder_mask )
+                    solder_mask->ApplyScalePosition( pLayerDispList );
+
+                pLayerDispList->DrawCulled( showThickness, solder_mask, throughHolesOuter, anti_board );
             }
 
-            if( m_antiBoard )
-                m_antiBoard->ApplyScalePosition( pLayerDispList );
-
-            if( outerTH )
-                outerTH->ApplyScalePosition( pLayerDispList );
-
-            pLayerDispList->DrawCulled( showThickness, outerTH, viaHoles, m_antiBoard );
-
-            // Draw plated & offboard pads
-            if( layer == F_Cu && ( m_platedPadsFront || m_offboardPadsFront ) )
-            {
-                setPlatedCopperAndDepthOffset( layer );
-
-                if( m_platedPadsFront )
-                    m_platedPadsFront->DrawCulled( showThickness, outerTH, viaHoles, m_antiBoard );
-
-                if( m_offboardPadsFront )
-                    m_offboardPadsFront->DrawCulled( showThickness, outerTH, viaHoles );
-            }
-            else if( layer == B_Cu && ( m_platedPadsBack || m_offboardPadsBack ) )
-            {
-                setPlatedCopperAndDepthOffset( layer );
-
-                if( m_platedPadsBack )
-                    m_platedPadsBack->DrawCulled( showThickness, outerTH, viaHoles, m_antiBoard );
-
-                if( m_offboardPadsBack )
-                    m_offboardPadsBack->DrawCulled( showThickness, outerTH, viaHoles );
-            }
-
-            unsetDepthOffset();
+            glPopMatrix();
         }
-        else
-        {
-            setLayerMaterial( layer );
-
-            OPENGL_RENDER_LIST* throughHolesOuter = nullptr;
-            OPENGL_RENDER_LIST* anti_board = nullptr;
-            OPENGL_RENDER_LIST* solder_mask = nullptr;
-
-            if( !skipRenderHoles )
-            {
-                if( isSilkLayer && cfg.clip_silk_on_via_annuli )
-                    throughHolesOuter = m_outerThroughHoleRings;
-                else
-                    throughHolesOuter = m_outerThroughHoles;
-            }
-
-            if( isSilkLayer && cfg.show_off_board_silk )
-                anti_board = nullptr;
-            else if( LSET::PhysicalLayersMask().test( layer ) )
-                anti_board = m_antiBoard;
-
-            if( isSilkLayer && cfg.subtract_mask_from_silk && !cfg.show_off_board_silk )
-                solder_mask = m_layers[ ( layer == B_SilkS) ? B_Mask : F_Mask ];
-
-            if( throughHolesOuter )
-                throughHolesOuter->ApplyScalePosition( pLayerDispList );
-
-            if( anti_board )
-                anti_board->ApplyScalePosition( pLayerDispList );
-
-            if( solder_mask )
-                solder_mask->ApplyScalePosition( pLayerDispList );
-
-            pLayerDispList->DrawCulled( showThickness, solder_mask, throughHolesOuter, anti_board );
-        }
-
-        glPopMatrix();
     }
 
     glm::mat4 cameraViewMatrix;
@@ -1001,6 +1219,26 @@ void RENDER_3D_OPENGL::freeAllLists()
     DELETE_AND_FREE( m_padHoles )
     DELETE_AND_FREE( m_viaFrontCover )
     DELETE_AND_FREE( m_viaBackCover )
+
+    // Free per-area display lists
+    for( auto& [idx, map] : m_areaLayers )
+    {
+        for( auto& [layer, ptr] : map )
+            delete ptr;
+    }
+
+    m_areaLayers.clear();
+
+    DELETE_AND_FREE_MAP( m_areaBoard )
+    DELETE_AND_FREE_MAP( m_areaBoardWithHoles )
+    DELETE_AND_FREE_MAP( m_areaAntiBoard )
+    DELETE_AND_FREE_MAP( m_areaPlatedPadsFront )
+    DELETE_AND_FREE_MAP( m_areaPlatedPadsBack )
+    DELETE_AND_FREE_MAP( m_areaOuterThroughHoles )
+    DELETE_AND_FREE_MAP( m_areaPadHoles )
+    DELETE_AND_FREE_MAP( m_areaMicroviaHoles )
+
+    m_hasPerAreaGeometry = false;
 }
 
 
@@ -1009,15 +1247,87 @@ void RENDER_3D_OPENGL::renderSolderMaskLayer( PCB_LAYER_ID aLayerID, float aZPos
 {
     wxASSERT( (aLayerID == B_Mask) || (aLayerID == F_Mask) );
 
-    if( m_board )
+    float nonCopperThickness = m_boardAdapter.GetNonCopperLayerThickness();
+
+    if( m_hasPerAreaGeometry )
+    {
+        const auto& areas = m_boardAdapter.GetMultiPcbAreas();
+
+        auto renderAreaMask = [&]( int areaIdx )
+        {
+            auto boardIt = m_areaBoard.find( areaIdx );
+
+            if( boardIt == m_areaBoard.end() || !boardIt->second )
+                return;
+
+            OPENGL_RENDER_LIST* areaBoard = boardIt->second;
+            OPENGL_RENDER_LIST* areaMask = nullptr;
+
+            auto layersIt = m_areaLayers.find( areaIdx );
+
+            if( layersIt != m_areaLayers.end() )
+            {
+                auto maskIt = layersIt->second.find( aLayerID );
+
+                if( maskIt != layersIt->second.end() )
+                    areaMask = maskIt->second;
+            }
+
+            if( areaIdx >= 0 )
+            {
+                glPushMatrix();
+                glMultMatrixf( glm::value_ptr(
+                        m_boardAdapter.GetMultiPcbTransformMatrix( areaIdx ) ) );
+            }
+
+            OPENGL_RENDER_LIST* via_holes = nullptr;
+
+            if( !aSkipRenderHoles )
+            {
+                auto thIt = m_areaOuterThroughHoles.find( areaIdx );
+
+                if( thIt != m_areaOuterThroughHoles.end() )
+                    via_holes = thIt->second;
+            }
+
+            if( via_holes )
+                via_holes->ApplyScalePosition( aZPos, nonCopperThickness );
+
+            areaBoard->ApplyScalePosition( aZPos, nonCopperThickness );
+            setLayerMaterial( aLayerID );
+            areaBoard->SetItIsTransparent( true );
+            areaBoard->DrawCulled( aShowThickness, areaMask, via_holes );
+
+            if( areaIdx >= 0 )
+                glPopMatrix();
+        };
+
+        renderAreaMask( -1 );
+
+        for( int i = 0; i < (int)areas.size(); i++ )
+            renderAreaMask( i );
+
+        // Via covers are rendered globally (not split per area)
+        if( aLayerID == F_Mask && m_viaFrontCover )
+        {
+            m_viaFrontCover->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
+            m_viaFrontCover->DrawTop();
+        }
+        else if( aLayerID == B_Mask && m_viaBackCover )
+        {
+            m_viaBackCover->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
+            m_viaBackCover->DrawBot();
+        }
+    }
+    else if( m_board )
     {
         OPENGL_RENDER_LIST* solder_mask = m_layers[ aLayerID ];
         OPENGL_RENDER_LIST* via_holes = aSkipRenderHoles ? nullptr : m_outerThroughHoles;
 
         if( via_holes )
-            via_holes->ApplyScalePosition( aZPos, m_boardAdapter.GetNonCopperLayerThickness() );
+            via_holes->ApplyScalePosition( aZPos, nonCopperThickness );
 
-        m_board->ApplyScalePosition( aZPos, m_boardAdapter.GetNonCopperLayerThickness() );
+        m_board->ApplyScalePosition( aZPos, nonCopperThickness );
 
         setLayerMaterial( aLayerID );
         m_board->SetItIsTransparent( true );
@@ -1025,12 +1335,12 @@ void RENDER_3D_OPENGL::renderSolderMaskLayer( PCB_LAYER_ID aLayerID, float aZPos
 
         if( aLayerID == F_Mask && m_viaFrontCover )
         {
-            m_viaFrontCover->ApplyScalePosition( aZPos, 4 * m_boardAdapter.GetNonCopperLayerThickness() );
+            m_viaFrontCover->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
             m_viaFrontCover->DrawTop();
         }
         else if( aLayerID == B_Mask && m_viaBackCover )
         {
-            m_viaBackCover->ApplyScalePosition( aZPos, 4 * m_boardAdapter.GetNonCopperLayerThickness() );
+            m_viaBackCover->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
             m_viaBackCover->DrawBot();
         }
     }

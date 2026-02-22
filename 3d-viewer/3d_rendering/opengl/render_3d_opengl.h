@@ -39,6 +39,7 @@
 #include "3d_model.h"
 
 #include "3d_cache/3d_info.h"
+#include "3d_canvas/multi_pcb_transform.h"
 
 #include <geometry/eda_angle.h>
 
@@ -90,6 +91,16 @@ private:
                                            const BVH_CONTAINER_2D* aThroughHoles = nullptr );
 
     OPENGL_RENDER_LIST* generateEmptyLayerList( PCB_LAYER_ID aLayer );
+
+    /**
+     * Generate per-area layer lists by splitting the 2D container's objects
+     * based on which multi-PCB area each object's centroid falls in.
+     */
+    void generatePerAreaLayerLists( const BVH_CONTAINER_2D* aContainer,
+                                    const SHAPE_POLY_SET* aPolyList,
+                                    PCB_LAYER_ID aLayer,
+                                    const BVH_CONTAINER_2D* aThroughHoles,
+                                    const std::vector<MULTI_PCB_AREA>& aAreas );
 
     void addTopAndBottomTriangles( TRIANGLE_DISPLAY_LIST* aDst, const SFVEC2F& v0,
                                    const SFVEC2F& v1, const SFVEC2F& v2, float top, float bot );
@@ -289,6 +300,19 @@ private:
     SHAPE_POLY_SET m_antiBoardPolys; ///< The negative polygon representation of the board
                                      ///< outline.
     SPHERES_GIZMO* m_spheres_gizmo;
+
+    // Per-area display lists for multi-PCB transforms
+    // Key: area index (-1 = no area / identity transform)
+    std::map<int, MAP_OGL_DISP_LISTS> m_areaLayers;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaBoard;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaBoardWithHoles;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaAntiBoard;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaPlatedPadsFront;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaPlatedPadsBack;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaOuterThroughHoles;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaPadHoles;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaMicroviaHoles;
+    bool m_hasPerAreaGeometry = false;
 };
 
 #endif // RENDER_3D_OPENGL_H

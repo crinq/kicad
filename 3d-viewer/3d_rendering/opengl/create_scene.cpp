@@ -375,6 +375,114 @@ OPENGL_RENDER_LIST* RENDER_3D_OPENGL::generateEmptyLayerList( PCB_LAYER_ID aLaye
 }
 
 
+void RENDER_3D_OPENGL::generatePerAreaLayerLists(
+        const BVH_CONTAINER_2D* aContainer,
+        const SHAPE_POLY_SET* aPolyList,
+        PCB_LAYER_ID aLayer,
+        const BVH_CONTAINER_2D* aThroughHoles,
+        const std::vector<MULTI_PCB_AREA>& aAreas )
+{
+    if( !aContainer )
+        return;
+
+    const LIST_OBJECT2D& listObject2d = aContainer->GetList();
+
+    if( listObject2d.empty() )
+        return;
+
+    float zBot = 0.0f;
+    float zTop = 0.0f;
+
+    getLayerZPos( aLayer, zTop, zBot );
+
+    // Group objects by area index (-1 = not in any area)
+    std::map<int, std::vector<const OBJECT_2D*>> objectsByArea;
+
+    for( const OBJECT_2D* obj : listObject2d )
+    {
+        const SFVEC2F& centroid = obj->GetCentroid();
+        VECTOR2I biuPos( (int)( centroid.x / m_boardAdapter.BiuTo3dUnits() ),
+                         (int)( -centroid.y / m_boardAdapter.BiuTo3dUnits() ) );
+
+        int areaIdx = FindMultiPcbArea( aAreas, biuPos );
+        objectsByArea[areaIdx].push_back( obj );
+    }
+
+    // For each area group, build a TRIANGLE_DISPLAY_LIST and OPENGL_RENDER_LIST
+    for( auto& [areaIdx, objects] : objectsByArea )
+    {
+        TRIANGLE_DISPLAY_LIST* layerTriangles =
+                new TRIANGLE_DISPLAY_LIST( objects.size() * 8 );
+        m_triangles.push_back( layerTriangles );
+
+        for( const OBJECT_2D* object2d : objects )
+        {
+            switch( object2d->GetObjectType() )
+            {
+            case OBJECT_2D_TYPE::FILLED_CIRCLE:
+                addObjectTriangles( static_cast<const FILLED_CIRCLE_2D*>( object2d ),
+                                    layerTriangles, zTop, zBot );
+                break;
+
+            case OBJECT_2D_TYPE::POLYGON4PT:
+                addObjectTriangles( static_cast<const POLYGON_4PT_2D*>( object2d ),
+                                    layerTriangles, zTop, zBot );
+                break;
+
+            case OBJECT_2D_TYPE::RING:
+                addObjectTriangles( static_cast<const RING_2D*>( object2d ),
+                                    layerTriangles, zTop, zBot );
+                break;
+
+            case OBJECT_2D_TYPE::TRIANGLE:
+                addObjectTriangles( static_cast<const TRIANGLE_2D*>( object2d ),
+                                    layerTriangles, zTop, zBot );
+                break;
+
+            case OBJECT_2D_TYPE::ROUNDSEG:
+                addObjectTriangles( static_cast<const ROUND_SEGMENT_2D*>( object2d ),
+                                    layerTriangles, zTop, zBot );
+                break;
+
+            default:
+                break;
+            }
+        }
+
+        // Handle polygon contours per area
+        if( aPolyList && aPolyList->OutlineCount() > 0 )
+        {
+            SHAPE_POLY_SET areaPoly;
+
+            if( areaIdx >= 0 && areaIdx < (int)aAreas.size() )
+            {
+                areaPoly = aPolyList->CloneDropTriangulation();
+                areaPoly.BooleanIntersection( aAreas[areaIdx].outline );
+            }
+            else
+            {
+                areaPoly = aPolyList->CloneDropTriangulation();
+
+                for( const MULTI_PCB_AREA& area : aAreas )
+                    areaPoly.BooleanSubtract( area.outline );
+            }
+
+            if( areaPoly.OutlineCount() > 0 )
+            {
+                layerTriangles->AddToMiddleContours( areaPoly, zBot, zTop,
+                                                     m_boardAdapter.BiuTo3dUnits(),
+                                                     false, aThroughHoles );
+            }
+        }
+
+        OPENGL_RENDER_LIST* oglList =
+                new OPENGL_RENDER_LIST( *layerTriangles, m_circleTexture, zBot, zTop );
+
+        m_areaLayers[areaIdx][aLayer] = oglList;
+    }
+}
+
+
 OPENGL_RENDER_LIST* RENDER_3D_OPENGL::createBoard( const SHAPE_POLY_SET& aBoardPoly,
                                                    const BVH_CONTAINER_2D* aThroughHoles )
 {
@@ -742,6 +850,100 @@ void RENDER_3D_OPENGL::reload( REPORTER* aStatusReporter, REPORTER* aWarningRepo
 
     m_boardWithHoles = createBoard( board_poly_with_holes, &m_boardAdapter.GetTH_IDs() );
 
+    // Split board body per multi-PCB area when transforms are active
+    m_hasPerAreaGeometry = false;
+
+    if( m_boardAdapter.HasMultiPcbTransforms() )
+    {
+        m_hasPerAreaGeometry = true;
+        const auto& areas = m_boardAdapter.GetMultiPcbAreas();
+
+        auto subtractHolesFromPoly = [this]( SHAPE_POLY_SET& aPoly )
+        {
+            aPoly.BooleanSubtract( m_boardAdapter.GetTH_ODPolys() );
+
+            if( m_boardAdapter.GetFrontCounterborePolys().OutlineCount() > 0 )
+                aPoly.BooleanSubtract( m_boardAdapter.GetFrontCounterborePolys() );
+
+            if( m_boardAdapter.GetBackCounterborePolys().OutlineCount() > 0 )
+                aPoly.BooleanSubtract( m_boardAdapter.GetBackCounterborePolys() );
+
+            if( m_boardAdapter.GetFrontCountersinkPolys().OutlineCount() > 0 )
+                aPoly.BooleanSubtract( m_boardAdapter.GetFrontCountersinkPolys() );
+
+            if( m_boardAdapter.GetBackCountersinkPolys().OutlineCount() > 0 )
+                aPoly.BooleanSubtract( m_boardAdapter.GetBackCountersinkPolys() );
+
+            if( m_boardAdapter.GetBackdrillPolys().OutlineCount() > 0 )
+                aPoly.BooleanSubtract( m_boardAdapter.GetBackdrillPolys() );
+
+            if( m_boardAdapter.GetTertiarydrillPolys().OutlineCount() > 0 )
+                aPoly.BooleanSubtract( m_boardAdapter.GetTertiarydrillPolys() );
+        };
+
+        auto buildAntiBoard = [this]( const SHAPE_POLY_SET& aBoardPoly )
+                -> OPENGL_RENDER_LIST*
+        {
+            SHAPE_POLY_SET antiPoly;
+            antiPoly.NewOutline();
+            antiPoly.Append( VECTOR2I( -INT_MAX/2, -INT_MAX/2 ) );
+            antiPoly.Append( VECTOR2I(  INT_MAX/2, -INT_MAX/2 ) );
+            antiPoly.Append( VECTOR2I(  INT_MAX/2,  INT_MAX/2 ) );
+            antiPoly.Append( VECTOR2I( -INT_MAX/2,  INT_MAX/2 ) );
+            antiPoly.Outline( 0 ).SetClosed( true );
+            antiPoly.BooleanSubtract( aBoardPoly );
+            return createBoard( antiPoly );
+        };
+
+        for( int i = 0; i < (int)areas.size(); i++ )
+        {
+            SHAPE_POLY_SET areaBoardPoly =
+                    m_boardAdapter.GetBoardPoly().CloneDropTriangulation();
+            areaBoardPoly.BooleanIntersection( areas[i].outline );
+
+            if( areaBoardPoly.OutlineCount() > 0 )
+            {
+                m_areaBoard[i] = createBoard( areaBoardPoly,
+                                               &m_boardAdapter.GetTH_IDs() );
+
+                SHAPE_POLY_SET areaBoardWithHoles =
+                        areaBoardPoly.CloneDropTriangulation();
+                subtractHolesFromPoly( areaBoardWithHoles );
+                m_areaBoardWithHoles[i] = createBoard( areaBoardWithHoles,
+                                                        &m_boardAdapter.GetTH_IDs() );
+
+                m_areaAntiBoard[i] = buildAntiBoard( areaBoardPoly );
+
+                if( m_areaAntiBoard[i] )
+                    m_areaAntiBoard[i]->SetItIsTransparent( true );
+            }
+        }
+
+        // Board outside all transform areas (area -1)
+        SHAPE_POLY_SET remainingBoardPoly =
+                m_boardAdapter.GetBoardPoly().CloneDropTriangulation();
+
+        for( const MULTI_PCB_AREA& area : areas )
+            remainingBoardPoly.BooleanSubtract( area.outline );
+
+        if( remainingBoardPoly.OutlineCount() > 0 )
+        {
+            m_areaBoard[-1] = createBoard( remainingBoardPoly,
+                                            &m_boardAdapter.GetTH_IDs() );
+
+            SHAPE_POLY_SET remainingWithHoles =
+                    remainingBoardPoly.CloneDropTriangulation();
+            subtractHolesFromPoly( remainingWithHoles );
+            m_areaBoardWithHoles[-1] = createBoard( remainingWithHoles,
+                                                     &m_boardAdapter.GetTH_IDs() );
+
+            m_areaAntiBoard[-1] = buildAntiBoard( remainingBoardPoly );
+
+            if( m_areaAntiBoard[-1] )
+                m_areaAntiBoard[-1]->SetItIsTransparent( true );
+        }
+    }
+
     // Create plugs for backdrilled and post-machined areas
     backfillPostMachine();
 
@@ -771,6 +973,47 @@ void RENDER_3D_OPENGL::reload( REPORTER* aStatusReporter, REPORTER* aWarningRepo
         m_outerThroughHoleRings = generateHoles( m_boardAdapter.GetViaAnnuli().GetList(),
                                                  m_boardAdapter.GetViaAnnuliPolys(),
                                                  1.0f, 0.0f, false );
+    }
+
+    // Split through-hole masks per multi-PCB area
+    if( m_hasPerAreaGeometry )
+    {
+        const auto& areas = m_boardAdapter.GetMultiPcbAreas();
+        const double biuScale = m_boardAdapter.BiuTo3dUnits();
+        const LIST_OBJECT2D& allTHObjects = m_boardAdapter.GetTH_ODs().GetList();
+
+        // Group through-hole objects by area
+        std::map<int, LIST_OBJECT2D> areaHoleObjects;
+
+        for( OBJECT_2D* obj : allTHObjects )
+        {
+            SFVEC2F centroid = obj->GetCentroid();
+            VECTOR2I biuPos( (int)( centroid.x / biuScale ),
+                             (int)( -centroid.y / biuScale ) );
+            int areaIdx = FindMultiPcbArea( areas, biuPos );
+            areaHoleObjects[areaIdx].push_back( obj );
+        }
+
+        for( auto& [areaIdx, objList] : areaHoleObjects )
+        {
+            if( objList.empty() )
+                continue;
+
+            SHAPE_POLY_SET areaPoly = outerPolyTHT.CloneDropTriangulation();
+
+            if( areaIdx >= 0 )
+            {
+                areaPoly.BooleanIntersection( areas[areaIdx].outline );
+            }
+            else
+            {
+                for( const auto& area : areas )
+                    areaPoly.BooleanSubtract( area.outline );
+            }
+
+            m_areaOuterThroughHoles[areaIdx] = generateHoles( objList, areaPoly,
+                                                               1.0f, 0.0f, false );
+        }
     }
 
     const MAP_POLY& innerMapHoles = m_boardAdapter.GetHoleIdPolysMap();
@@ -874,11 +1117,20 @@ void RENDER_3D_OPENGL::reload( REPORTER* aStatusReporter, REPORTER* aWarningRepo
             }
         }
 
-        OPENGL_RENDER_LIST* oglList = generateLayerList( container2d, polyList, layer,
-                                                         &m_boardAdapter.GetTH_IDs() );
+        if( m_hasPerAreaGeometry )
+        {
+            generatePerAreaLayerLists( container2d, polyList, layer,
+                                       &m_boardAdapter.GetTH_IDs(),
+                                       m_boardAdapter.GetMultiPcbAreas() );
+        }
+        else
+        {
+            OPENGL_RENDER_LIST* oglList = generateLayerList( container2d, polyList, layer,
+                                                             &m_boardAdapter.GetTH_IDs() );
 
-        if( oglList != nullptr )
-            m_layers[layer] = oglList;
+            if( oglList != nullptr )
+                m_layers[layer] = oglList;
+        }
     }
 
     if( m_boardAdapter.m_Cfg->m_Render.DifferentiatePlatedCopper() )
@@ -896,11 +1148,20 @@ void RENDER_3D_OPENGL::reload( REPORTER* aStatusReporter, REPORTER* aWarningRepo
             poly.BooleanSubtract( m_boardAdapter.GetFrontCountersinkPolys() );
             poly.BooleanSubtract( m_boardAdapter.GetTertiarydrillPolys() );
 
-            m_platedPadsFront = generateLayerList( m_boardAdapter.GetPlatedPadsFront(), &poly,
-                                                   F_Cu );
+            if( m_hasPerAreaGeometry )
+            {
+                generatePerAreaLayerLists( m_boardAdapter.GetPlatedPadsFront(), &poly,
+                                           F_Cu, nullptr,
+                                           m_boardAdapter.GetMultiPcbAreas() );
+            }
+            else
+            {
+                m_platedPadsFront = generateLayerList( m_boardAdapter.GetPlatedPadsFront(),
+                                                       &poly, F_Cu );
+            }
 
             // An entry for F_Cu must exist in m_layers or we'll never look at m_platedPadsFront
-            if( m_layers.count( F_Cu ) == 0 )
+            if( !m_hasPerAreaGeometry && m_layers.count( F_Cu ) == 0 )
                 m_layers[F_Cu] = generateEmptyLayerList( F_Cu );
         }
 
@@ -914,10 +1175,20 @@ void RENDER_3D_OPENGL::reload( REPORTER* aStatusReporter, REPORTER* aWarningRepo
             poly.BooleanSubtract( m_boardAdapter.GetBackCountersinkPolys() );
             poly.BooleanSubtract( m_boardAdapter.GetBackdrillPolys() );
 
-            m_platedPadsBack = generateLayerList( m_boardAdapter.GetPlatedPadsBack(), &poly, B_Cu );
+            if( m_hasPerAreaGeometry )
+            {
+                generatePerAreaLayerLists( m_boardAdapter.GetPlatedPadsBack(), &poly,
+                                           B_Cu, nullptr,
+                                           m_boardAdapter.GetMultiPcbAreas() );
+            }
+            else
+            {
+                m_platedPadsBack = generateLayerList( m_boardAdapter.GetPlatedPadsBack(),
+                                                      &poly, B_Cu );
+            }
 
             // An entry for B_Cu must exist in m_layers or we'll never look at m_platedPadsBack
-            if( m_layers.count( B_Cu ) == 0 )
+            if( !m_hasPerAreaGeometry && m_layers.count( B_Cu ) == 0 )
                 m_layers[B_Cu] = generateEmptyLayerList( B_Cu );
         }
     }
@@ -1227,7 +1498,12 @@ void RENDER_3D_OPENGL::generateViaBarrels( float aPlatingThickness3d, float aUni
     unsigned int averageSegCount = m_boardAdapter.GetCircleSegmentCount( averageDiameter );
     unsigned int trianglesEstimate = averageSegCount * 8 * m_boardAdapter.GetViaCount();
 
-    TRIANGLE_DISPLAY_LIST* layerTriangleVIA = new TRIANGLE_DISPLAY_LIST( trianglesEstimate );
+    const auto& areas = m_boardAdapter.GetMultiPcbAreas();
+    std::map<int, TRIANGLE_DISPLAY_LIST*> areaTriLists;
+    TRIANGLE_DISPLAY_LIST* layerTriangleVIA = nullptr;
+
+    if( !m_hasPerAreaGeometry )
+        layerTriangleVIA = new TRIANGLE_DISPLAY_LIST( trianglesEstimate );
 
     for( const PCB_TRACK* track : m_boardAdapter.GetBoard()->Tracks() )
     {
@@ -1235,6 +1511,16 @@ void RENDER_3D_OPENGL::generateViaBarrels( float aPlatingThickness3d, float aUni
             continue;
 
         const PCB_VIA* via = static_cast<const PCB_VIA*>( track );
+
+        if( m_hasPerAreaGeometry )
+        {
+            int areaIdx = FindMultiPcbArea( areas, via->GetStart() );
+
+            if( areaTriLists.find( areaIdx ) == areaTriLists.end() )
+                areaTriLists[areaIdx] = new TRIANGLE_DISPLAY_LIST( trianglesEstimate / 2 );
+
+            layerTriangleVIA = areaTriLists[areaIdx];
+        }
         bool isBackdrilled = via->GetSecondaryDrillSize().has_value();
         bool isTertiarydrilled = via->GetTertiaryDrillSize().has_value();
         bool hasFrontPostMachining = via->GetFrontPostMachining().value_or( PAD_DRILL_POST_MACHINING_MODE::UNKNOWN )
@@ -1352,6 +1638,16 @@ void RENDER_3D_OPENGL::generateViaBarrels( float aPlatingThickness3d, float aUni
             if( pad->GetDrillShape() != PAD_DRILL_SHAPE::CIRCLE )
                 continue;
 
+            if( m_hasPerAreaGeometry )
+            {
+                int areaIdx = FindMultiPcbArea( areas, pad->GetPosition() );
+
+                if( areaTriLists.find( areaIdx ) == areaTriLists.end() )
+                    areaTriLists[areaIdx] = new TRIANGLE_DISPLAY_LIST( trianglesEstimate / 2 );
+
+                layerTriangleVIA = areaTriLists[areaIdx];
+            }
+
             const SFVEC2F padCenter( pad->GetPosition().x * aUnitScale,
                                         -pad->GetPosition().y * aUnitScale );
             const float holeInnerRadius =
@@ -1385,9 +1681,19 @@ void RENDER_3D_OPENGL::generateViaBarrels( float aPlatingThickness3d, float aUni
         }
     }
 
-    m_microviaHoles = new OPENGL_RENDER_LIST( *layerTriangleVIA, 0, 0.0f, 0.0f );
-
-    delete layerTriangleVIA;
+    if( m_hasPerAreaGeometry )
+    {
+        for( auto& [idx, triList] : areaTriLists )
+        {
+            m_areaMicroviaHoles[idx] = new OPENGL_RENDER_LIST( *triList, 0, 0.0f, 0.0f );
+            delete triList;
+        }
+    }
+    else
+    {
+        m_microviaHoles = new OPENGL_RENDER_LIST( *layerTriangleVIA, 0, 0.0f, 0.0f );
+        delete layerTriangleVIA;
+    }
 }
 
 
@@ -1449,45 +1755,89 @@ void RENDER_3D_OPENGL::generatePlatedHoleShells( int aPlatingThickness, float aU
     ConvertPolygonToTriangles( tht_outer_holes_poly, holesContainer,
                                aUnitScale, *m_boardAdapter.GetBoard() );
 
-    const LIST_OBJECT2D& holes2D = holesContainer.GetList();
+    if( !m_boardAdapter.m_Cfg->m_Render.show_plated_barrels )
+        return;
 
-    if( holes2D.size() > 0 && m_boardAdapter.m_Cfg->m_Render.show_plated_barrels )
+    float layer_z_top, layer_z_bot, dummy;
+
+    getLayerZPos( F_Cu, layer_z_top, dummy );
+    getLayerZPos( B_Cu, dummy, layer_z_bot );
+
+    if( m_hasPerAreaGeometry )
     {
-        float layer_z_top, layer_z_bot, dummy;
+        const auto& areas = m_boardAdapter.GetMultiPcbAreas();
 
-        getLayerZPos( F_Cu, layer_z_top, dummy );
-        getLayerZPos( B_Cu, dummy, layer_z_bot );
-
-        TRIANGLE_DISPLAY_LIST* layerTriangles = new TRIANGLE_DISPLAY_LIST( holes2D.size() );
-
-        for( const OBJECT_2D* itemOnLayer : holes2D )
+        for( int areaIdx = -1; areaIdx < (int) areas.size(); areaIdx++ )
         {
-            const OBJECT_2D* object2d_A = itemOnLayer;
+            SHAPE_POLY_SET areaPoly = tht_outer_holes_poly.CloneDropTriangulation();
 
-            wxASSERT( object2d_A->GetObjectType() == OBJECT_2D_TYPE::TRIANGLE );
+            if( areaIdx >= 0 )
+                areaPoly.BooleanIntersection( areas[areaIdx].outline );
+            else
+            {
+                for( const auto& area : areas )
+                    areaPoly.BooleanSubtract( area.outline );
+            }
 
-            const TRIANGLE_2D* tri = static_cast<const TRIANGLE_2D*>( object2d_A );
+            if( areaPoly.OutlineCount() == 0 )
+                continue;
 
-            const SFVEC2F& v1 = tri->GetP1();
-            const SFVEC2F& v2 = tri->GetP2();
-            const SFVEC2F& v3 = tri->GetP3();
+            CONTAINER_2D areaContainer;
+            ConvertPolygonToTriangles( areaPoly, areaContainer, aUnitScale,
+                                       *m_boardAdapter.GetBoard() );
 
-            addTopAndBottomTriangles( layerTriangles, v1, v2, v3, layer_z_top, layer_z_bot );
+            const LIST_OBJECT2D& areaHoles2D = areaContainer.GetList();
+
+            if( areaHoles2D.size() == 0 )
+                continue;
+
+            TRIANGLE_DISPLAY_LIST* triList =
+                    new TRIANGLE_DISPLAY_LIST( areaHoles2D.size() );
+
+            for( const OBJECT_2D* item : areaHoles2D )
+            {
+                const TRIANGLE_2D* tri = static_cast<const TRIANGLE_2D*>( item );
+                addTopAndBottomTriangles( triList, tri->GetP1(), tri->GetP2(), tri->GetP3(),
+                                          layer_z_top, layer_z_bot );
+            }
+
+            triList->AddToMiddleContours( areaPoly, layer_z_bot, layer_z_top, aUnitScale,
+                                           false );
+
+            m_areaPadHoles[areaIdx] = new OPENGL_RENDER_LIST( *triList, m_circleTexture,
+                                                               layer_z_top, layer_z_top );
+            delete triList;
         }
+    }
+    else
+    {
+        const LIST_OBJECT2D& holes2D = holesContainer.GetList();
 
-        wxASSERT( tht_outer_holes_poly.OutlineCount() > 0 );
-
-        if( tht_outer_holes_poly.OutlineCount() > 0 )
+        if( holes2D.size() > 0 )
         {
-            layerTriangles->AddToMiddleContours( tht_outer_holes_poly,
-                                                 layer_z_bot, layer_z_top,
-                                                 aUnitScale, false );
+            TRIANGLE_DISPLAY_LIST* layerTriangles =
+                    new TRIANGLE_DISPLAY_LIST( holes2D.size() );
 
-            m_padHoles = new OPENGL_RENDER_LIST( *layerTriangles, m_circleTexture,
-                                                 layer_z_top, layer_z_top );
+            for( const OBJECT_2D* itemOnLayer : holes2D )
+            {
+                const TRIANGLE_2D* tri =
+                        static_cast<const TRIANGLE_2D*>( itemOnLayer );
+
+                addTopAndBottomTriangles( layerTriangles, tri->GetP1(), tri->GetP2(),
+                                          tri->GetP3(), layer_z_top, layer_z_bot );
+            }
+
+            if( tht_outer_holes_poly.OutlineCount() > 0 )
+            {
+                layerTriangles->AddToMiddleContours( tht_outer_holes_poly, layer_z_bot,
+                                                      layer_z_top, aUnitScale, false );
+
+                m_padHoles = new OPENGL_RENDER_LIST( *layerTriangles, m_circleTexture,
+                                                      layer_z_top, layer_z_top );
+            }
+
+            delete layerTriangles;
         }
-
-        delete layerTriangles;
     }
 }
 

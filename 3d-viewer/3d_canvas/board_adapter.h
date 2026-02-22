@@ -555,7 +555,16 @@ public:
      */
     bool HasMultiPcbTransforms() const
     {
-        return m_Cfg && m_Cfg->m_Render.apply_multi_pcb_transform && !m_multiPcbAreas.empty();
+        return m_Cfg && m_Cfg->m_Render.multi_pcb_transform_factor > 0.0f
+               && !m_multiPcbAreas.empty();
+    }
+
+    /**
+     * Get the current transform interpolation factor (0.0 = flat, 1.0 = fully assembled).
+     */
+    float GetMultiPcbTransformFactor() const
+    {
+        return m_Cfg ? m_Cfg->m_Render.multi_pcb_transform_factor : 0.0f;
     }
 
     /**

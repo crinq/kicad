@@ -408,8 +408,8 @@ EDA_3D_VIEWER_SETTINGS::EDA_3D_VIEWER_SETTINGS() :
                                             &m_Render.use_board_editor_copper_colors, false ) );
     m_params.emplace_back( new PARAM<bool>( "render.preview_show_board_body",
                                             &m_Render.preview_show_board_body, true ) );
-    m_params.emplace_back( new PARAM<bool>( "render.apply_multi_pcb_transform",
-                                            &m_Render.apply_multi_pcb_transform, false ) );
+    m_params.emplace_back( new PARAM<float>( "render.multi_pcb_transform_factor",
+                                            &m_Render.multi_pcb_transform_factor, 0.0f ) );
     m_params.emplace_back( new PARAM<bool>( "camera.animation_enabled",
                                             &m_Camera.animation_enabled, true ) );
     m_params.emplace_back( new PARAM<int>( "camera.moving_speed_multiplier",

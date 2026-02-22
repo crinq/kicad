@@ -43,18 +43,18 @@ class ZONE;
  * Translation is in mm, rotation angles in degrees.
  * The convention is:
  *   x, y, z  - translation offset
- *   a        - rotation around Z axis (yaw)
+ *   a        - rotation around X axis (roll)
  *   b        - rotation around Y axis (pitch)
- *   c        - rotation around X axis (roll)
+ *   c        - rotation around Z axis (yaw)
  */
 struct MULTI_PCB_TRANSFORM_DATA
 {
     double x = 0.0;    ///< Translation X in mm
     double y = 0.0;    ///< Translation Y in mm
     double z = 0.0;    ///< Translation Z in mm
-    double a = 0.0;    ///< Rotation around Z axis in degrees
+    double a = 0.0;    ///< Rotation around X axis in degrees
     double b = 0.0;    ///< Rotation around Y axis in degrees
-    double c = 0.0;    ///< Rotation around X axis in degrees
+    double c = 0.0;    ///< Rotation around Z axis in degrees
 
     bool IsIdentity() const
     {
@@ -120,6 +120,18 @@ std::vector<MULTI_PCB_AREA> ScanMultiPcbAreas( const BOARD* aBoard );
  */
 glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
                                 double aBiuTo3Dunits );
+
+/**
+ * Build an interpolated 4x4 transformation matrix.
+ *
+ * @param aTransform the transform specification
+ * @param aBiuTo3Dunits conversion factor from board internal units to 3D units
+ * @param aFactor interpolation factor: 0.0 = identity, 1.0 = full transform
+ * @return the 4x4 transformation matrix
+ */
+glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
+                                double aBiuTo3Dunits,
+                                float aFactor );
 
 
 /**

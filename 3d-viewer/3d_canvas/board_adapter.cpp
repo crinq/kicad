@@ -605,14 +605,15 @@ void BOARD_ADAPTER::InitSettings( REPORTER* aStatusReporter, REPORTER* aWarningR
     m_multiPcbAreas.clear();
     m_multiPcbTransformMatrices.clear();
 
-    if( m_board && m_Cfg && m_Cfg->m_Render.apply_multi_pcb_transform )
+    if( m_board && m_Cfg && m_Cfg->m_Render.multi_pcb_transform_factor > 0.0f )
     {
         m_multiPcbAreas = ScanMultiPcbAreas( m_board );
+        float factor = m_Cfg->m_Render.multi_pcb_transform_factor;
 
         for( const MULTI_PCB_AREA& area : m_multiPcbAreas )
         {
             m_multiPcbTransformMatrices.push_back(
-                    BuildTransformMatrix( area.transform, m_biuTo3Dunits ) );
+                    BuildTransformMatrix( area.transform, m_biuTo3Dunits, factor ) );
         }
     }
 }

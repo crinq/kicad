@@ -272,17 +272,39 @@ glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
     // Apply translation
     mat = glm::translate( mat, glm::vec3( tx, ty, tz ) );
 
-    // Apply rotations (ZYX order: first yaw around Z, then pitch around Y, then roll around X)
-    if( aTransform.a != 0.0 )
-        mat = glm::rotate( mat, glm::radians( (float)aTransform.a ), glm::vec3( 0.0f, 0.0f, 1.0f ) );
+    // Apply rotations: a around X, b around Y, c around Z
+    if( aTransform.c != 0.0 )
+        mat = glm::rotate( mat, glm::radians( (float)aTransform.c ), glm::vec3( 0.0f, 0.0f, 1.0f ) );
 
     if( aTransform.b != 0.0 )
         mat = glm::rotate( mat, glm::radians( (float)aTransform.b ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
 
-    if( aTransform.c != 0.0 )
-        mat = glm::rotate( mat, glm::radians( (float)aTransform.c ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
+    if( aTransform.a != 0.0 )
+        mat = glm::rotate( mat, glm::radians( (float)aTransform.a ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
 
     return mat;
+}
+
+
+glm::mat4 BuildTransformMatrix( const MULTI_PCB_TRANSFORM_DATA& aTransform,
+                                double aBiuTo3Dunits,
+                                float aFactor )
+{
+    if( aFactor <= 0.0f || aTransform.IsIdentity() )
+        return glm::mat4( 1.0f );
+
+    if( aFactor >= 1.0f )
+        return BuildTransformMatrix( aTransform, aBiuTo3Dunits );
+
+    MULTI_PCB_TRANSFORM_DATA interpolated;
+    interpolated.x = aTransform.x * aFactor;
+    interpolated.y = aTransform.y * aFactor;
+    interpolated.z = aTransform.z * aFactor;
+    interpolated.a = aTransform.a * aFactor;
+    interpolated.b = aTransform.b * aFactor;
+    interpolated.c = aTransform.c * aFactor;
+
+    return BuildTransformMatrix( interpolated, aBiuTo3Dunits );
 }
 
 
