@@ -61,8 +61,7 @@ Translation (`x`, `y`, `z`) is applied after rotation and is independent of the 
 ### 4. Enable in 3D Viewer
 
 1. Open the 3D Viewer (Alt+3 or View → 3D Viewer)
-2. In the **Appearance** panel on the right, check **"Apply multi-PCB transforms"**
-3. The 3D models on sub-PCBs will move to their assembled positions
+2. In the **Appearance** panel on the right, use the **"Multi-PCB transforms"** slider to move the sub-PCBs into their assembled positions
 
 ## Transform Coordinate System
 
