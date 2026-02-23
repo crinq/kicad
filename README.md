@@ -1,3 +1,7 @@
+POC for better multi pcb support in the 3D viewer. 
+Mostly implemented by Claude Code.<br>
+[some docs](multi_pcb.md)
+
 # KiCad README
 
 For specific documentation about [building KiCad](https://dev-docs.kicad.org/en/build/), policies
