@@ -22,9 +22,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  */
 
-#include <gal/opengl/kiglew.h>    // Must be included first
-#include <gal/opengl/gl_utils.h>
+#include <kicad_gl/kiglu.h> // Must be included first
+#include <kicad_gl/gl_utils.h>
+#include <kicad_gl/gl_context_mgr.h>
+
 #include <wx/tokenzr.h>
+
+#include <fmt/format.h>
 
 #include "../common_ogl/ogl_utils.h"
 #include "eda_3d_canvas.h"
@@ -36,11 +40,12 @@
 #include <build_version.h>
 #include <settings/color_settings.h>
 #include <board.h>
+#include <footprint.h>
 #include <pad.h>
 #include <pcb_field.h>
+#include <pcb_track.h>
 #include <reporter.h>
 #include <widgets/wx_infobar.h>
-#include <gal/opengl/gl_context_mgr.h>
 #include <core/profile.h>        // To use GetRunningMicroSecs or another profiling utility
 #include <bitmaps.h>
 #include <kiway_holder.h>
@@ -52,9 +57,8 @@
 #include <string_utils.h>
 #include <mail_type.h>
 #include <kiway_mail.h>
-#include <fmt/format.h>
-
 #include <widgets/wx_busy_indicator.h>
+#include <zone.h>
 
 
 /**
@@ -224,20 +228,18 @@ bool  EDA_3D_CANVAS::initializeOpenGL()
 
     SetOpenGLBackendInfo( GL_UTILS::DetectGLBackend( this ) );
 
-    const GLenum err = glewInit();
+    const int glVersion = gladLoaderLoadGL();
 
-    if( GLEW_OK != err )
+    if( glVersion == 0 )
     {
-        const wxString msgError = (const char*) glewGetErrorString( err );
-
-        wxLogMessage( msgError );
+        wxLogMessage( wxT( "Failed to load OpenGL via loader" ) );
 
         return false;
     }
     else
     {
-        wxLogTrace( m_logTrace, wxT( "EDA_3D_CANVAS::initializeOpenGL Using GLEW version %s" ),
-                    From_UTF8( (char*) glewGetString( GLEW_VERSION ) ) );
+        wxLogTrace( m_logTrace, wxT( "EDA_3D_CANVAS::initializeOpenGL Using OpenGL version %s" ),
+                    From_UTF8( (char*) glGetString( GL_VERSION ) ) );
     }
 
     SetOpenGLInfo( (const char*) glGetString( GL_VENDOR ), (const char*) glGetString( GL_RENDERER ),
@@ -295,7 +297,7 @@ bool  EDA_3D_CANVAS::initializeOpenGL()
 #if wxCHECK_VERSION( 3, 3, 3 )
     wxGLCanvas::SetSwapInterval( -1 );
 #else
-    GL_UTILS::SetSwapInterval( -1 );
+    GL_UTILS::SetSwapInterval( this, -1 );
 #endif
 
     m_is_opengl_initialized = true;

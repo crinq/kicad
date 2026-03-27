@@ -71,8 +71,6 @@ bool FP_TREE_SYNCHRONIZING_ADAPTER::IsContainer( const wxDataViewItem& aItem ) c
 }
 
 
-#define PROGRESS_INTERVAL_MILLIS 33     // 30 FPS refresh rate
-
 void FP_TREE_SYNCHRONIZING_ADAPTER::Sync( FOOTPRINT_LIBRARY_ADAPTER* aLibs )
 {
     m_libs = aLibs;
@@ -147,6 +145,10 @@ int FP_TREE_SYNCHRONIZING_ADAPTER::GetLibrariesCount() const
 
 void FP_TREE_SYNCHRONIZING_ADAPTER::updateLibrary( LIB_TREE_NODE_LIBRARY& aLibNode )
 {
+    // Re-enumerate from disk if the library has changed since it was last preloaded.
+    // This picks up external modifications such as git branch switches.
+    m_libs->RefreshLibraryIfChanged( aLibNode.m_Name );
+
     std::vector<FOOTPRINT*> footprints = m_libs->GetFootprints( aLibNode.m_Name, true );
 
     // Build a map of footprint names for quick lookup

@@ -39,6 +39,8 @@ using namespace std::placeholders;
 #include <board.h>
 #include <component_classes/component_class_manager.h>
 #include <footprint.h>
+#include <pad.h>
+#include <pcb_track.h>
 #include <spread_footprints.h>
 #include <ratsnest/ratsnest_data.h>
 #include <pcb_io/pcb_io_mgr.h>
@@ -282,7 +284,7 @@ void PCB_EDIT_FRAME::LoadFootprints( NETLIST& aNetlist, REPORTER& aReporter )
                 continue;            // Footprint does not exist in any library.
 
             footprint = new FOOTPRINT( *footprint );
-            const_cast<KIID&>( footprint->m_Uuid ) = KIID();
+            footprint->ResetUuidDirect();
         }
 
         if( footprint )

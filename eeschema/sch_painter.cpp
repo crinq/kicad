@@ -1787,9 +1787,13 @@ void SCH_PAINTER::draw( const SCH_LINE* aLine, int aLayer )
     double             highlightAlpha = 0.6;
     EESCHEMA_SETTINGS* eeschemaCfg = eeconfig();
     double             hopOverScale = 0.0;
+    int                defaultLineWidth = schIUScale.MilsToIU( DEFAULT_LINE_WIDTH_MILS );
 
     if( aLine->Schematic() )    // Can be nullptr when run from the color selection panel
+    {
         hopOverScale = aLine->Schematic()->Settings().m_HopOverScale;
+        defaultLineWidth = aLine->Schematic()->Settings().m_DefaultLineWidth;
+    }
 
     if( eeschemaCfg )
     {
@@ -1914,8 +1918,7 @@ void SCH_PAINTER::draw( const SCH_LINE* aLine, int aLayer )
 
     if( aLine->IsWire() && hopOverScale > 0.0 )
     {
-        double   lineWidth = getLineWidth( aLine, false, drawingNetColorHighlights );
-        double   arcRadius = lineWidth * hopOverScale;
+        double arcRadius = defaultLineWidth * hopOverScale;
         curr_wire_shape = aLine->BuildWireWithHopShape( m_schematic->GetCurrentScreen(), arcRadius );
     }
     else
@@ -1932,8 +1935,7 @@ void SCH_PAINTER::draw( const SCH_LINE* aLine, int aLayer )
                                             // there are always 2 points in list for a segment
         {
             VECTOR2I end( curr_wire_shape[ii].x, curr_wire_shape[ii].y );
-            drawLine( start, end, lineStyle,
-                      ( lineStyle <= LINE_STYLE::FIRST_TYPE || drawingShadows ), width );
+            drawLine( start, end, lineStyle, ( lineStyle <= LINE_STYLE::FIRST_TYPE || drawingShadows ), width );
         }
         else   // This is the start point of a arc. there are always 3 points in list for an arc
         {
@@ -2246,15 +2248,15 @@ void SCH_PAINTER::draw( const SCH_TEXT* aText, int aLayer, bool aDimmed )
 
     if( drawingShadows && font->IsOutline() )
     {
-        VECTOR2I pos( aText->GetDrawPos() );
-
-        pos += text_offset;
-
-        if( aText->Type() == SCH_TEXT_T )
-            pos += aText->GetOffsetToMatchSCH_FIELD( nullptr );
-
         // Trying to draw glyph-shaped shadows on outline text is a fool's errand.  Just box it.
-        boxText( *m_gal, shownText, pos, attrs, aText->GetFontMetrics() );
+        // Use GetBoundingBox() which correctly handles multiline text dimensions.
+        BOX2I bbox = aText->GetBoundingBox();
+
+        bbox.Inflate( attrs.m_StrokeWidth / 2, attrs.m_StrokeWidth * 2 );
+
+        m_gal->SetIsFill( true );
+        m_gal->SetIsStroke( false );
+        m_gal->DrawRectangle( bbox.GetOrigin(), bbox.GetEnd() );
     }
     else if( aText->GetLayer() == LAYER_DEVICE )
     {
@@ -2702,8 +2704,8 @@ void SCH_PAINTER::draw( const SCH_SYMBOL* aSymbol, int aLayer )
     int bodyStyle = aSymbol->GetBodyStyle();
 
     // Use dummy symbol if the actual couldn't be found (or couldn't be locked).
-    LIB_SYMBOL* originalSymbol =
-            aSymbol->GetLibSymbolRef() ? aSymbol->GetLibSymbolRef().get() : LIB_SYMBOL::GetDummy();
+    LIB_SYMBOL*           originalSymbol = aSymbol->GetLibSymbolRef() ? aSymbol->GetLibSymbolRef().get()
+                                                                      : LIB_SYMBOL::GetDummy();
     std::vector<SCH_PIN*> originalPins = originalSymbol->GetGraphicalPins( unit, bodyStyle );
 
     // Copy the source so we can re-orient and translate it.
@@ -2794,8 +2796,7 @@ void SCH_PAINTER::draw( const SCH_SYMBOL* aSymbol, int aLayer )
         BOX2I    bbox = aSymbol->GetBodyBoundingBox();
         BOX2I    pins = aSymbol->GetBodyAndPinsBoundingBox();
         VECTOR2D margins( std::max( bbox.GetX() - pins.GetX(), pins.GetEnd().x - bbox.GetEnd().x ),
-                          std::max( bbox.GetY() - pins.GetY(),
-                                    pins.GetEnd().y - bbox.GetEnd().y ) );
+                          std::max( bbox.GetY() - pins.GetY(), pins.GetEnd().y - bbox.GetEnd().y ) );
         int      strokeWidth = 3 * schIUScale.MilsToIU( DEFAULT_LINE_WIDTH_MILS );
 
         margins.x = std::max( margins.x * 0.6, margins.y * 0.3 );

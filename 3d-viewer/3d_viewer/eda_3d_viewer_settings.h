@@ -155,6 +155,7 @@ public:
         bool differentiate_plated_copper;
         bool use_board_editor_copper_colors;    // OpenGL only
         bool preview_show_board_body;
+        bool show_missing_models; // Show placeholder for missing 3D models
         float multi_pcb_transform_factor;        // 0.0 = flat layout, 1.0 = fully assembled
 
         /**

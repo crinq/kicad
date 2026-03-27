@@ -83,6 +83,8 @@ set( QA_EESCHEMA_SRCS
     test_issue22864_align_sheet_pins.cpp
     test_issue22938_local_power.cpp
     test_issue23058_jumper_pin_groups.cpp
+    test_issue23143_junction_midpoint.cpp
+    test_issue23403_shared_subsheet_screen.cpp
     test_issue22576_subsheet_standalone.cpp
     test_issue16915_bus_netclass.cpp
     test_nc_pin_connectivity.cpp
@@ -123,6 +125,7 @@ set( QA_EESCHEMA_SRCS
     test_flat_hierarchy.cpp
     test_multi_top_level_sheets.cpp
     test_save_load_schematic.cpp
+    test_project_name_instances.cpp
     test_legacy_load.cpp
     test_symbol_library_manager.cpp
     test_symbol_import_manager.cpp
@@ -130,6 +133,8 @@ set( QA_EESCHEMA_SRCS
     test_stacked_pin_conversion.cpp
     test_pin_stacked_layout.cpp
     test_pin_text_overlap.cpp
+    test_remote_symbol_download_security.cpp
+    test_remote_symbol_import.cpp
     test_netlist_exporter_xml_stacked.cpp
     test_resolve_drivers.cpp
     test_saveas_copy_subsheets.cpp
@@ -166,7 +171,6 @@ PRIVATE
     common
     kicommon
     pads_common
-    scripting
     kimath
     qa_utils
     qa_schematic_utils

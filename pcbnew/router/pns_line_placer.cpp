@@ -22,6 +22,10 @@
 #include <optional>
 #include <memory>
 
+#include <wx/log.h>
+
+#include <board_item.h>
+
 #include "pns_arc.h"
 #include "pns_debug_decorator.h"
 #include "pns_line_placer.h"
@@ -33,7 +37,6 @@
 #include "pns_walkaround.h"
 #include "pns_mouse_trail_tracer.h"
 
-#include <wx/log.h>
 
 namespace PNS {
 
@@ -479,7 +482,7 @@ bool LINE_PLACER::cursorDistMinimum( const SHAPE_LINE_CHAIN& aL, const VECTOR2I&
     int minDistGlob = std::numeric_limits<int>::max();
     int minPGlob = -1;
 
-    for( int i = 0; i < dists.size(); i++ )
+    for( int i = 0; i < (int) dists.size(); i++ )
     {
         int d = dists[i];
 
@@ -492,7 +495,7 @@ bool LINE_PLACER::cursorDistMinimum( const SHAPE_LINE_CHAIN& aL, const VECTOR2I&
 
     if( dists.size() >= 3 )
     {
-        for( int i = 0; i < dists.size() - 3; i++ )
+        for( int i = 0; i < (int) dists.size() - 3; i++ )
         {
             if( dists[i + 2] > dists[i + 1] && dists[i] > dists[i + 1] )
             {
@@ -540,11 +543,10 @@ bool LINE_PLACER::cursorDistMinimum( const SHAPE_LINE_CHAIN& aL, const VECTOR2I&
     thresholdDist = 0;
 
     SHAPE_LINE_CHAIN l( aL ), prefL;
-    int minDist = std::numeric_limits<int>::max();
 
     bool ok = false;
 
-    for( int i = 0; i < pts.size() ; i++)
+    for( int i = 0; i < (int) pts.size() ; i++)
     {
         //PNS_DBG( Dbg(), AddPoint, pts[i], BLUE, 500000, wxT( "hug-target-fallback" ) );
 
@@ -1007,7 +1009,7 @@ bool LINE_PLACER::rhShoveOnly( const VECTOR2I& aP, LINE& aNewHead, LINE& aNewTai
             aNewHead.AppendVia( newHead.Via() );
 
         OPTIMIZER::Optimize( &aNewHead, effort, m_currentNode );
-        PNS_DBG( Dbg(), AddItem, aNewHead.Clone(), GREEN, 1000000, "head-sh-postopt" );
+        PNS_DBG( Dbg(), AddItem, &aNewHead, GREEN, 1000000, "head-sh-postopt" );
 
         return true;
     }
@@ -2187,4 +2189,3 @@ int FIXED_TAIL::StageCount() const
 }
 
 }
-

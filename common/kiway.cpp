@@ -124,7 +124,6 @@ const wxString KIWAY::dso_search_path( FACE_T aFaceId )
     case FACE_PL_EDITOR:        name = KIFACE_PREFIX "pl_editor";           break;
     case FACE_PCB_CALCULATOR:   name = KIFACE_PREFIX "pcb_calculator";      break;
     case FACE_BMP2CMP:          name = KIFACE_PREFIX "bitmap2component";    break;
-    case FACE_PYTHON:           name = KIFACE_PREFIX "kipython";            break;
 
     default:
         wxASSERT_MSG( 0, wxT( "caller has a bug, passed a bad aFaceId" ) );
@@ -187,7 +186,6 @@ const wxString KIWAY::dso_search_path( FACE_T aFaceId )
         switch( aFaceId )
         {
             case FACE_PL_EDITOR: dirName = "pagelayout_editor";   break;
-            case FACE_PYTHON:    dirName = "scripting";           break;
             default:             dirName = name + 1;              break;
         }
 
@@ -364,9 +362,6 @@ KIWAY::FACE_T KIWAY::KifaceType( FRAME_T aFrameType )
     case FRAME_CVPCB:
     case FRAME_CVPCB_DISPLAY:
         return FACE_CVPCB;
-
-    case FRAME_PYTHON:
-        return FACE_PYTHON;
 
     case FRAME_GERBER:
         return FACE_GERBVIEW;
@@ -754,6 +749,40 @@ bool KIWAY::ProcessJobConfigDialog( KIWAY::FACE_T aFace, JOB* aJob, wxWindow* aW
     KIFACE* kiface = KiFACE( aFace );
 
     return kiface->HandleJobConfig( aJob, aWindow );
+}
+
+
+bool KIWAY::ProcessApiOpenDocument( KIWAY::FACE_T aFace, const wxString& aPath, KICAD_API_SERVER* aServer,
+                                    wxString* aError )
+{
+    KIFACE* kiface = KiFACE( aFace );
+
+    if( !kiface )
+    {
+        if( aError )
+            *aError = wxS( "Failed to load requested face" );
+
+        return false;
+    }
+
+    return kiface->HandleApiOpenDocument( aPath, aServer, aError );
+}
+
+
+bool KIWAY::ProcessApiCloseDocument( KIWAY::FACE_T aFace, const wxString& aPath, KICAD_API_SERVER* aServer,
+                                     wxString* aError )
+{
+    KIFACE* kiface = KiFACE( aFace );
+
+    if( !kiface )
+    {
+        if( aError )
+            *aError = wxS( "Failed to load requested face" );
+
+        return false;
+    }
+
+    return kiface->HandleApiCloseDocument( aPath, aServer, aError );
 }
 
 

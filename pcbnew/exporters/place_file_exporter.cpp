@@ -32,6 +32,7 @@
 #include <board_design_settings.h>
 #include <build_version.h>
 #include <exporters/place_file_exporter.h>
+#include <footprint.h>
 #include <pad.h>
 
 #include <fmt/format.h>
@@ -315,7 +316,7 @@ std::string PLACE_FILE_EXPORTER::GenReportData()
 
     buffer += "\n$BeginDESCRIPTION\n";
 
-    BOX2I bbbox = m_board->ComputeBoundingBox( false );
+    BOX2I bbbox = m_board->ComputeBoundingBox( false, true );
 
     buffer += "\n$BOARD\n";
 

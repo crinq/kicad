@@ -45,11 +45,31 @@ class KICOMMON_API API_PLUGIN_MANAGER : public wxEvtHandler
 public:
     API_PLUGIN_MANAGER( wxEvtHandler* aParent );
 
-    void ReloadPlugins();
+    /**
+     * Clears the loaded plugins and actions and re-scans the filesystem to register new ones.
+     * @param aDirectoryToScan can be provided to scan an arbitrary directory instead of the
+     *                         stock paths; provided for QA testing.
+     */
+    void ReloadPlugins( std::optional<wxString> aDirectoryToScan = std::nullopt );
 
     void RecreatePluginEnvironment( const wxString& aIdentifier );
 
     void InvokeAction( const wxString& aIdentifier );
+
+    /**
+     * Invokes an action synchronously, capturing its output.  Mainly used for things like
+     * wizards that have actions that return quickly and pass data to KiCad via stdout.
+     * @param aIdentifier is the plugin action to invoke
+     * @param aExtraArgs are extra arguments to pass to the action beyond the ones specified in the
+     *                   plugin configuration file
+     * @param aStdout is a pointer to a string to fill with the stdout output of the action
+     * @param aStderr is a pointer to a string to fill with the stderr output of the action
+     * @return the exit code from the action process
+     */
+    int InvokeActionSync( const wxString& aIdentifier, std::vector<wxString> aExtraArgs,
+                          wxString* aStdout = nullptr, wxString* aStderr = nullptr );
+
+    bool Busy() const;
 
     std::optional<const PLUGIN_ACTION*> GetAction( const wxString& aIdentifier );
 
@@ -63,6 +83,10 @@ private:
     void processPluginDependencies();
 
     void processNextJob( wxCommandEvent& aEvent );
+
+    int doInvokeAction( const wxString& aIdentifier, std::vector<wxString> aExtraArgs,
+                        bool aSync = false, wxString* aStdout = nullptr,
+                        wxString* aStderr = nullptr );
 
     wxEvtHandler* m_parent;
 

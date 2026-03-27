@@ -73,6 +73,7 @@ public:
         m_progress_reporter = nullptr;
         m_xml_doc = nullptr;
         m_xml_root = nullptr;
+        m_contentNode = nullptr;
         m_lastAppendedNode = nullptr;
     }
 
@@ -301,6 +302,7 @@ private:
     wxString                m_mfg;          //<! If set, field name containing the part manufacturer
     wxString                m_distpn;       //<! If set, field name containing the distributor part number
     wxString                m_dist;         //<! If set, field name containing the distributor name
+    wxString                m_bomRev;       //<! BOM revision string for the BomHeader element
 
     // Node pointer to the main enterprise node to be used for adding
     // enterprises later when forming the AVL
@@ -365,6 +367,7 @@ private:
 
     wxXmlDocument*          m_xml_doc;
     wxXmlNode*              m_xml_root;
+    wxXmlNode*              m_contentNode;
 
     wxXmlNode*              m_lastAppendedNode;     ///< Optimization for appendNode to avoid O(n) child traversal
 };

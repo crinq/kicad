@@ -75,6 +75,8 @@
 #include <dialogs/dialog_tuning_pattern_properties.h>
 
 #include <generators/pcb_tuning_pattern.h>
+#include <project/project_file.h>
+#include <project/tuning_profiles.h>
 #include <properties/property.h>
 #include <properties/property_mgr.h>
 
@@ -459,6 +461,17 @@ PCB_TUNING_PATTERN* PCB_TUNING_PATTERN::CreateNew( GENERATOR_TOOL* aTool,
                 pattern->m_settings.m_isTimeDomain = false;
             }
         }
+        else if( aStartItem->GetEffectiveNetClass()->HasTuningProfile() )
+        {
+            // Check if the tuning profile has time domain tuning enabled
+            const std::shared_ptr<TUNING_PROFILES> tuningParams =
+                    board->GetProject()->GetProjectFile().TuningProfileParameters();
+            TUNING_PROFILE& profile =
+                    tuningParams->GetTuningProfile( aStartItem->GetEffectiveNetClass()->GetTuningProfile() );
+
+            if( profile.m_EnableTimeDomainTuning )
+                pattern->m_settings.m_isTimeDomain = true;
+        }
     }
     else
     {
@@ -574,6 +587,11 @@ void PCB_TUNING_PATTERN::EditStart( GENERATOR_TOOL* aTool, BOARD* aBoard, BOARD_
                 m_settings.m_isTimeDomain = constraint.m_IsTimeDomain;
                 aTool->GetManager()->PostEvent( EVENTS::SelectedItemsModified );
             }
+            else if( track->GetEffectiveNetClass()->HasTuningProfile() )
+            {
+                m_settings.m_isTimeDomain = true;
+                aTool->GetManager()->PostEvent( EVENTS::SelectedItemsModified );
+            }
         }
         else
         {
@@ -604,6 +622,11 @@ void PCB_TUNING_PATTERN::EditStart( GENERATOR_TOOL* aTool, BOARD* aBoard, BOARD_
                     }
 
                     m_settings.m_isTimeDomain = constraint.m_IsTimeDomain;
+                    aTool->GetManager()->PostEvent( EVENTS::SelectedItemsModified );
+                }
+                else if( track->GetEffectiveNetClass()->HasTuningProfile() )
+                {
+                    m_settings.m_isTimeDomain = true;
                     aTool->GetManager()->PostEvent( EVENTS::SelectedItemsModified );
                 }
             }

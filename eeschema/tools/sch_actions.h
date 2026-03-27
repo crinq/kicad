@@ -198,7 +198,7 @@ public:
 
     // Attribute Toggles
     static TOOL_ACTION setExcludeFromBOM;
-    static TOOL_ACTION setExcludeFromSimulation;
+    static TOOL_ACTION setExcludeFromSim;
     static TOOL_ACTION setExcludeFromBoard;
     static TOOL_ACTION setDNP;
 
@@ -272,9 +272,10 @@ public:
     static TOOL_ACTION importGraphics;
     static TOOL_ACTION exportSymbolView;
     static TOOL_ACTION exportSymbolAsSVG;
-    static TOOL_ACTION showPythonConsole;
     static TOOL_ACTION previousUnit;
     static TOOL_ACTION nextUnit;
+    static TOOL_ACTION previousSymbol;
+    static TOOL_ACTION nextSymbol;
 
     // Line modes
     static TOOL_ACTION lineModeFree;

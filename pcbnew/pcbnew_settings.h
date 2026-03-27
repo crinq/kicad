@@ -269,7 +269,5 @@ public:
 
     wxString  m_LastFootprintLibDir;
     wxString  m_LastFootprint3dDir;
-
-    ACTION_PLUGIN_SETTINGS_LIST m_VisibleActionPlugins;
 };
 

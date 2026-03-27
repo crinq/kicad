@@ -45,6 +45,7 @@
 #include <font/outline_font.h>
 #include <length_delay_calculation/length_delay_calculation.h>
 #include <lset.h>
+#include <pad.h>
 #include <pcb_base_frame.h>
 #include <pcb_track.h>
 #include <pcb_marker.h>
@@ -77,6 +78,9 @@
 #include <pcb_board_outline.h>
 #include <local_history.h>
 #include <pcb_io/pcb_io_mgr.h>
+#include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
+#include <advanced_config.h>
+#include <richio.h>
 #include <trace_helpers.h>
 
 // This is an odd place for this, but CvPcb won't link if it's in board_item.cpp like I first
@@ -85,7 +89,7 @@ VECTOR2I BOARD_ITEM::ZeroOffset( 0, 0 );
 
 
 BOARD::BOARD() :
-        BOARD_ITEM_CONTAINER( (BOARD_ITEM*) nullptr, PCB_T ),
+        BOARD_ITEM_CONTAINER( nullptr, PCB_T ),
         m_LegacyDesignSettingsLoaded( false ),
         m_LegacyCopperEdgeClearanceLoaded( false ),
         m_LegacyNetclassesLoaded( false ),
@@ -159,6 +163,7 @@ BOARD::BOARD() :
 BOARD::~BOARD()
 {
     m_itemByIdCache.clear();
+    m_cachedIdByItem.clear();
 
     // Clean up the owned elements
     DeleteMARKERs();
@@ -199,6 +204,9 @@ bool BOARD::BuildConnectivity( PROGRESS_REPORTER* aReporter )
 
 void BOARD::SetProject( PROJECT* aProject, bool aReferenceOnly )
 {
+    if( m_project == aProject )
+        return;
+
     if( m_project )
         ClearProject();
 
@@ -287,6 +295,7 @@ void BOARD::IncrementTimeStamp()
         m_DRCMaxPhysicalClearance = 0;
         m_DRCZones.clear();
         m_DRCCopperZones.clear();
+        m_DRCCopperZonesByLayer.clear();
         m_ZoneIsolatedIslandsMap.clear();
         m_CopperZoneRTreeCache.clear();
 
@@ -1155,12 +1164,18 @@ void BOARD::CacheTriangulation( PROGRESS_REPORTER* aReporter, const std::vector<
 
     returns.reserve( zones.size() );
 
-    auto cache_zones = [aReporter]( ZONE* aZone ) -> size_t
+    SHAPE_POLY_SET::TASK_SUBMITTER submitter =
+            [&tp]( std::function<void()> aTask )
+            {
+                tp.detach_task( std::move( aTask ) );
+            };
+
+    auto cache_zones = [aReporter, &submitter]( ZONE* aZone ) -> size_t
     {
         if( aReporter && aReporter->IsCancelled() )
             return 0;
 
-        aZone->CacheTriangulation();
+        aZone->CacheTriangulation( UNDEFINED_LAYER, submitter );
 
         if( aReporter )
             aReporter->AdvanceProgress();
@@ -1227,7 +1242,7 @@ void BOARD::Add( BOARD_ITEM* aBoardItem, ADD_MODE aMode, bool aSkipConnectivity 
         return;
     }
 
-    m_itemByIdCache.insert( { aBoardItem->m_Uuid, aBoardItem } );
+    CacheItemById( aBoardItem );
 
     switch( aBoardItem->Type() )
     {
@@ -1281,12 +1296,7 @@ void BOARD::Add( BOARD_ITEM* aBoardItem, ADD_MODE aMode, bool aSkipConnectivity 
         else
             m_footprints.push_front( footprint );
 
-        footprint->RunOnChildren(
-                [&]( BOARD_ITEM* aChild )
-                {
-                    m_itemByIdCache.insert( { aChild->m_Uuid, aChild } );
-                },
-                RECURSE_MODE::NO_RECURSE );
+        CacheChildrenById( footprint );
         break;
     }
 
@@ -1311,14 +1321,7 @@ void BOARD::Add( BOARD_ITEM* aBoardItem, ADD_MODE aMode, bool aSkipConnectivity 
 
         if( aBoardItem->Type() == PCB_TABLE_T )
         {
-            PCB_TABLE* table = static_cast<PCB_TABLE*>( aBoardItem );
-
-            table->RunOnChildren(
-                    [&]( BOARD_ITEM* aChild )
-                    {
-                        m_itemByIdCache.insert( { aChild->m_Uuid, aChild } );
-                    },
-                    RECURSE_MODE::NO_RECURSE );
+            CacheChildrenById( aBoardItem );
         }
 
         break;
@@ -1369,7 +1372,7 @@ void BOARD::BulkRemoveStaleTeardrops( BOARD_COMMIT& aCommit )
 
         if( zone->IsTeardropArea() && zone->HasFlag( STRUCT_DELETED ) )
         {
-            m_itemByIdCache.erase( zone->m_Uuid );
+            UncacheItemById( zone->m_Uuid );
             m_zones.erase( m_zones.begin() + ii );
             m_connectivity->Remove( zone );
             aCommit.Removed( zone );
@@ -1383,7 +1386,15 @@ void BOARD::Remove( BOARD_ITEM* aBoardItem, REMOVE_MODE aRemoveMode )
     // find these calls and fix them!  Don't send me no stinking' nullptr.
     wxASSERT( aBoardItem );
 
-    m_itemByIdCache.erase( aBoardItem->m_Uuid );
+    // This is redundant with BOARD_COMMIT::Push but necessary to support SWIG interaction
+    // until the SWIG API is completely removed (since it doesn't use the commit system)
+    if( EDA_GROUP* parentGroup = aBoardItem->GetParentGroup();
+        parentGroup && !( parentGroup->AsEdaItem()->GetFlags() & STRUCT_DELETED ) )
+    {
+        parentGroup->RemoveItem( aBoardItem );
+    }
+
+    UncacheItemById( aBoardItem->m_Uuid );
 
     switch( aBoardItem->Type() )
     {
@@ -1415,14 +1426,7 @@ void BOARD::Remove( BOARD_ITEM* aBoardItem, REMOVE_MODE aRemoveMode )
     case PCB_FOOTPRINT_T:
     {
         std::erase( m_footprints, aBoardItem );
-        FOOTPRINT* footprint = static_cast<FOOTPRINT*>( aBoardItem );
-
-        footprint->RunOnChildren(
-                [&]( BOARD_ITEM* aChild )
-                {
-                    m_itemByIdCache.erase( aChild->m_Uuid );
-                },
-                RECURSE_MODE::NO_RECURSE );
+        UncacheChildrenById( aBoardItem );
 
         break;
     }
@@ -1449,14 +1453,7 @@ void BOARD::Remove( BOARD_ITEM* aBoardItem, REMOVE_MODE aRemoveMode )
 
         if( aBoardItem->Type() == PCB_TABLE_T )
         {
-            PCB_TABLE* table = static_cast<PCB_TABLE*>( aBoardItem );
-
-            table->RunOnChildren(
-                    [&]( BOARD_ITEM* aChild )
-                    {
-                        m_itemByIdCache.erase( aChild->m_Uuid );
-                    },
-                    RECURSE_MODE::NO_RECURSE );
+            UncacheChildrenById( aBoardItem );
         }
 
         break;
@@ -1554,6 +1551,9 @@ void BOARD::RemoveAll( std::initializer_list<KICAD_T> aTypes )
         default: wxFAIL_MSG( wxT( "BOARD::RemoveAll() needs more ::Type() support" ) );
         }
     }
+
+    m_itemByIdCache.clear();
+    m_cachedIdByItem.clear();
 
     IncrementTimeStamp();
 
@@ -1718,7 +1718,7 @@ void BOARD::UpdateUserUnits( BOARD_ITEM* aItem, KIGFX::VIEW* aView )
 void BOARD::DeleteMARKERs()
 {
     for( PCB_MARKER* marker : m_markers )
-        m_itemByIdCache.erase( marker->m_Uuid );
+        UncacheItemById( marker->m_Uuid );
 
     for( PCB_MARKER* marker : m_markers )
         delete marker;
@@ -1738,7 +1738,7 @@ void BOARD::DeleteMARKERs( bool aWarningsAndErrors, bool aExclusions )
         if( ( marker->GetSeverity() == RPT_SEVERITY_EXCLUSION && aExclusions )
             || ( marker->GetSeverity() != RPT_SEVERITY_EXCLUSION && aWarningsAndErrors ) )
         {
-            m_itemByIdCache.erase( marker->m_Uuid );
+            UncacheItemById( marker->m_Uuid );
             delete marker;
         }
         else
@@ -1781,47 +1781,39 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
     if( aID == niluuid )
         return nullptr;
 
-    auto cacheIt = m_itemByIdCache.find( aID );
-
-    if( cacheIt != m_itemByIdCache.end() )
-        return cacheIt->second;
+    if( BOARD_ITEM* cached = GetCachedItemById( aID ) )
+        return cached;
 
     // Linear scan fallback for items not in the cache.  Any hit is cached so
     // subsequent lookups for the same item are O(1).
 
-    auto cacheAndReturn = [this, &aID]( BOARD_ITEM* aItem ) -> BOARD_ITEM*
-    {
-        m_itemByIdCache.insert( { aID, aItem } );
-        return aItem;
-    };
-
     for( PCB_GROUP* group : m_groups )
     {
         if( group->m_Uuid == aID )
-            return cacheAndReturn( group );
+            return CacheAndReturnItemById( aID, group );
     }
 
     for( PCB_GENERATOR* generator : m_generators )
     {
         if( generator->m_Uuid == aID )
-            return cacheAndReturn( generator );
+            return CacheAndReturnItemById( aID, generator );
     }
 
     for( PCB_TRACK* track : Tracks() )
     {
         if( track->m_Uuid == aID )
-            return cacheAndReturn( track );
+            return CacheAndReturnItemById( aID, track );
     }
 
     for( FOOTPRINT* footprint : Footprints() )
     {
         if( footprint->m_Uuid == aID )
-            return cacheAndReturn( footprint );
+            return CacheAndReturnItemById( aID, footprint );
 
         for( PAD* pad : footprint->Pads() )
         {
             if( pad->m_Uuid == aID )
-                return cacheAndReturn( pad );
+                return CacheAndReturnItemById( aID, pad );
         }
 
         for( PCB_FIELD* field : footprint->GetFields() )
@@ -1829,32 +1821,32 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
             wxCHECK2( field, continue );
 
             if( field && field->m_Uuid == aID )
-                return cacheAndReturn( field );
+                return CacheAndReturnItemById( aID, field );
         }
 
         for( BOARD_ITEM* drawing : footprint->GraphicalItems() )
         {
             if( drawing->m_Uuid == aID )
-                return cacheAndReturn( drawing );
+                return CacheAndReturnItemById( aID, drawing );
         }
 
         for( BOARD_ITEM* zone : footprint->Zones() )
         {
             if( zone->m_Uuid == aID )
-                return cacheAndReturn( zone );
+                return CacheAndReturnItemById( aID, zone );
         }
 
         for( PCB_GROUP* group : footprint->Groups() )
         {
             if( group->m_Uuid == aID )
-                return cacheAndReturn( group );
+                return CacheAndReturnItemById( aID, group );
         }
     }
 
     for( ZONE* zone : Zones() )
     {
         if( zone->m_Uuid == aID )
-            return cacheAndReturn( zone );
+            return CacheAndReturnItemById( aID, zone );
     }
 
     for( BOARD_ITEM* drawing : Drawings() )
@@ -1864,30 +1856,30 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
             for( PCB_TABLECELL* cell : static_cast<PCB_TABLE*>( drawing )->GetCells() )
             {
                 if( cell->m_Uuid == aID )
-                    return cacheAndReturn( drawing );
+                    return CacheAndReturnItemById( aID, drawing );
             }
         }
 
         if( drawing->m_Uuid == aID )
-            return cacheAndReturn( drawing );
+            return CacheAndReturnItemById( aID, drawing );
     }
 
     for( PCB_MARKER* marker : m_markers )
     {
         if( marker->m_Uuid == aID )
-            return cacheAndReturn( marker );
+            return CacheAndReturnItemById( aID, marker );
     }
 
     for( PCB_POINT* point : m_points )
     {
         if( point->m_Uuid == aID )
-            return cacheAndReturn( point );
+            return CacheAndReturnItemById( aID, point );
     }
 
     for( NETINFO_ITEM* netInfo : m_NetInfo )
     {
         if( netInfo->m_Uuid == aID )
-            return cacheAndReturn( netInfo );
+            return CacheAndReturnItemById( aID, netInfo );
     }
 
     if( m_Uuid == aID )
@@ -1898,6 +1890,221 @@ BOARD_ITEM* BOARD::ResolveItem( const KIID& aID, bool aAllowNullptrReturn ) cons
         return nullptr;
 
     return DELETED_BOARD_ITEM::GetInstance();
+}
+
+
+BOARD_ITEM* BOARD::GetCachedItemById( const KIID& aId ) const
+{
+    auto it = m_itemByIdCache.find( aId );
+
+    if( it == m_itemByIdCache.end() )
+        return nullptr;
+
+    BOARD_ITEM* item = it->second;
+
+    if( item && item->m_Uuid == aId )
+        return item;
+
+    UncacheItemById( aId );
+    return nullptr;
+}
+
+
+void BOARD::CacheItemById( BOARD_ITEM* aItem ) const
+{
+    if( IsFootprintHolder() )
+        return;
+
+    if( auto prev = m_cachedIdByItem.find( aItem );
+        prev != m_cachedIdByItem.end() && prev->second != aItem->m_Uuid )
+    {
+        auto prevIt = m_itemByIdCache.find( prev->second );
+
+        if( prevIt != m_itemByIdCache.end() && prevIt->second == aItem )
+            m_itemByIdCache.erase( prevIt );
+    }
+
+    if( auto existing = m_itemByIdCache.find( aItem->m_Uuid );
+        existing != m_itemByIdCache.end() && existing->second != aItem )
+    {
+        if( auto prev = m_cachedIdByItem.find( existing->second );
+            prev != m_cachedIdByItem.end() && prev->second == aItem->m_Uuid )
+        {
+            m_cachedIdByItem.erase( prev );
+        }
+    }
+
+    m_itemByIdCache.insert_or_assign( aItem->m_Uuid, aItem );
+    m_cachedIdByItem.insert_or_assign( aItem, aItem->m_Uuid );
+}
+
+
+void BOARD::UncacheItemById( const KIID& aId ) const
+{
+    auto it = m_itemByIdCache.find( aId );
+
+    if( it == m_itemByIdCache.end() )
+        return;
+
+    const BOARD_ITEM* item = it->second;
+
+    m_itemByIdCache.erase( it );
+
+    if( auto cached = m_cachedIdByItem.find( item );
+        cached != m_cachedIdByItem.end() && cached->second == aId )
+    {
+        m_cachedIdByItem.erase( cached );
+    }
+}
+
+
+BOARD_ITEM* BOARD::CacheAndReturnItemById( const KIID& aId, BOARD_ITEM* aItem ) const
+{
+    if( auto prev = m_cachedIdByItem.find( aItem );
+        prev != m_cachedIdByItem.end() && prev->second != aId )
+    {
+        auto prevIt = m_itemByIdCache.find( prev->second );
+
+        if( prevIt != m_itemByIdCache.end() && prevIt->second == aItem )
+            m_itemByIdCache.erase( prevIt );
+    }
+
+    if( auto existing = m_itemByIdCache.find( aId );
+        existing != m_itemByIdCache.end() && existing->second != aItem )
+    {
+        if( auto prev = m_cachedIdByItem.find( existing->second );
+            prev != m_cachedIdByItem.end() && prev->second == aId )
+        {
+            m_cachedIdByItem.erase( prev );
+        }
+    }
+
+    m_itemByIdCache.insert_or_assign( aId, aItem );
+    m_cachedIdByItem.insert_or_assign( aItem, aId );
+
+    return aItem;
+}
+
+
+void BOARD::UncacheItemByPtr( const BOARD_ITEM* aItem )
+{
+    if( auto cached = m_cachedIdByItem.find( aItem ); cached != m_cachedIdByItem.end() )
+    {
+        auto it = m_itemByIdCache.find( cached->second );
+
+        if( it != m_itemByIdCache.end() && it->second == aItem )
+            m_itemByIdCache.erase( it );
+
+        m_cachedIdByItem.erase( cached );
+        return;
+    }
+
+    for( auto it = m_itemByIdCache.begin(); it != m_itemByIdCache.end(); )
+    {
+        if( it->second == aItem )
+            it = m_itemByIdCache.erase( it );
+        else
+            ++it;
+    }
+}
+
+
+void BOARD::RebindItemUuid( BOARD_ITEM* aItem, const KIID& aNewId )
+{
+    wxCHECK_RET( aItem, "BOARD::RebindItemUuid() requires a valid item" );
+
+    if( IsFootprintHolder() )
+        return;
+
+    if( aItem->m_Uuid == aNewId )
+    {
+        CacheAndReturnItemById( aNewId, aItem );
+        return;
+    }
+
+    if( BOARD_ITEM* existing = GetCachedItemById( aNewId ); existing && existing != aItem )
+    {
+        wxFAIL_MSG( wxString::Format( "BOARD::RebindItemUuid() duplicate target UUID: %s",
+                                      aNewId.AsString() ) );
+        return;
+    }
+
+    UncacheItemByPtr( aItem );
+    aItem->SetUuidDirect( aNewId );
+    CacheAndReturnItemById( aNewId, aItem );
+}
+
+
+int BOARD::RepairDuplicateItemUuids()
+{
+    std::set<KIID> ids;
+    int            duplicates = 0;
+
+    auto processItem =
+            [&]( BOARD_ITEM* aItem )
+            {
+                wxCHECK2( aItem, return );
+
+                if( ids.count( aItem->m_Uuid ) )
+                {
+                    duplicates++;
+                    RebindItemUuid( aItem, KIID() );
+                }
+
+                ids.insert( aItem->m_Uuid );
+            };
+
+    // Footprint IDs are the most important, so give them the first crack at "claiming" a
+    // particular KIID.
+    for( FOOTPRINT* footprint : Footprints() )
+        processItem( footprint );
+
+    // After that the principal use is for DRC marker pointers, which are most likely to pads
+    // or tracks.
+    for( FOOTPRINT* footprint : Footprints() )
+    {
+        for( PAD* pad : footprint->Pads() )
+            processItem( pad );
+    }
+
+    for( PCB_TRACK* track : Tracks() )
+        processItem( track );
+
+    // From here out I don't think order matters much.
+    for( FOOTPRINT* footprint : Footprints() )
+    {
+        processItem( &footprint->Reference() );
+        processItem( &footprint->Value() );
+
+        for( BOARD_ITEM* item : footprint->GraphicalItems() )
+            processItem( item );
+
+        for( ZONE* zone : footprint->Zones() )
+            processItem( zone );
+
+        for( PCB_GROUP* group : footprint->Groups() )
+            processItem( group );
+    }
+
+    // Everything owned by the board not handled above.
+    for( BOARD_ITEM* item : GetItemSet() )
+    {
+        // Top-level footprints and tracks were handled above.
+        switch( item->Type() )
+        {
+        case PCB_FOOTPRINT_T:
+        case PCB_TRACE_T:
+        case PCB_ARC_T:
+        case PCB_VIA_T:
+            break;
+
+        default:
+            processItem( item );
+            break;
+        }
+    }
+
+    return duplicates;
 }
 
 
@@ -2113,10 +2320,13 @@ unsigned BOARD::GetNodesCount( int aNet ) const
 }
 
 
-BOX2I BOARD::ComputeBoundingBox( bool aBoardEdgesOnly ) const
+BOX2I BOARD::ComputeBoundingBox( bool aBoardEdgesOnly, bool aPhysicalLayersOnly ) const
 {
     BOX2I bbox;
     LSET  visible = GetVisibleLayers();
+
+    if( aPhysicalLayersOnly )
+        visible &= LSET::PhysicalLayersMask();
 
     // If the board is just showing a footprint, we want all footprint layers included in the
     // bounding box
@@ -3686,7 +3896,7 @@ int BOARD::GetPadWithCastellatedAttrCount()
 }
 
 
-void BOARD::SaveToHistory( const wxString& aProjectPath, std::vector<wxString>& aFiles )
+void BOARD::SaveToHistory( const wxString& aProjectPath, std::vector<HISTORY_FILE_DATA>& aFileData )
 {
     wxString projPath = GetProject()->GetProjectPath();
 
@@ -3720,7 +3930,7 @@ void BOARD::SaveToHistory( const wxString& aProjectPath, std::vector<wxString>& 
     historyRoot.AppendDir( wxS( ".history" ) );
     wxFileName dst( historyRoot.GetPath(), rel );
 
-    // Ensure destination directories exist.
+    // Ensure destination directories exist on the UI thread so the background task can write.
     wxFileName dstDir( dst );
     dstDir.SetFullName( wxEmptyString );
 
@@ -3729,14 +3939,26 @@ void BOARD::SaveToHistory( const wxString& aProjectPath, std::vector<wxString>& 
 
     try
     {
-        IO_RELEASER<PCB_IO> pi( PCB_IO_MGR::FindPlugin( PCB_IO_MGR::KICAD_SEXP ) );
-        // Save directly to history mirror path.
-        pi->SaveBoard( dst.GetFullPath(), this, nullptr );
-        aFiles.push_back( dst.GetFullPath() );
-        wxLogTrace( traceAutoSave, wxS( "[history] pcb saver exported '%s'" ), dst.GetFullPath() );
+        PCB_IO_KICAD_SEXPR pi;
+        STRING_FORMATTER   formatter;
+
+        pi.FormatBoardToFormatter( &formatter, this, nullptr );
+
+        HISTORY_FILE_DATA entry;
+        entry.path = dst.GetFullPath();
+        entry.content = std::move( formatter.MutableString() );
+        entry.prettify = true;
+
+        if( ADVANCED_CFG::GetCfg().m_CompactSave )
+            entry.formatMode = KICAD_FORMAT::FORMAT_MODE::COMPACT_TEXT_PROPERTIES;
+
+        aFileData.push_back( std::move( entry ) );
+
+        wxLogTrace( traceAutoSave, wxS( "[history] pcb saver serialized %zu bytes for '%s'" ),
+                    aFileData.back().content.size(), dst.GetFullPath() );
     }
     catch( const IO_ERROR& ioe )
     {
-        wxLogTrace( traceAutoSave, wxS( "[history] pcb saver export failed: %s" ), wxString::FromUTF8( ioe.What() ) );
+        wxLogTrace( traceAutoSave, wxS( "[history] pcb saver serialize failed: %s" ), wxString::FromUTF8( ioe.What() ) );
     }
 }

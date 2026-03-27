@@ -750,6 +750,8 @@ protected:
     DECLARE_EVENT_TABLE()
 
 private:
+    void onUpdateUI( wxUpdateUIEvent& aEvent );
+
     /**
      * (with its unexpected name so it does not collide with the real OnWindowClose()
      * function provided in derived classes) is called just before a window
@@ -826,6 +828,9 @@ private:
 
     /// Map containing the UI update handlers registered with wx for each action.
     std::map<int, UIUpdateHandler> m_uiUpdateMap;
+
+    /// True once the single wxID_ANY UPDATE_UI handler has been bound.
+    bool m_uiUpdateHandlerBound;
 
     /// Set by the close window event handler after frames are asked if they can close.
     /// Allows other functions when called to know our state is cleanup.

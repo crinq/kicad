@@ -25,7 +25,6 @@
 #include "convert/allegro_parser.h"
 
 #include <array>
-#include <chrono>
 #include <cstring>
 
 #include <wx/sstream.h>
@@ -33,6 +32,7 @@
 #include <wx/translation.h>
 
 #include <core/profile.h>
+#include <core/throttle.h>
 #include <core/type_helpers.h>
 #include <ki_exception.h>
 
@@ -277,9 +277,16 @@ std::unique_ptr<ALLEGRO::FILE_HEADER> HEADER_PARSER::ParseHeader()
 
         switch( units )
         {
-        case BOARD_UNITS::IMPERIAL:
-        case BOARD_UNITS::METRIC: header->m_BoardUnits = static_cast<BOARD_UNITS>( units ); break;
-        default: THROW_IO_ERROR( wxString::Format( "Unknown board units %d", units ) );
+        case BOARD_UNITS::MILS:
+        case BOARD_UNITS::INCHES:
+        case BOARD_UNITS::MILLIMETERS:
+        case BOARD_UNITS::CENTIMETERS:
+        case BOARD_UNITS::MICROMETERS:
+            header->m_BoardUnits = static_cast<BOARD_UNITS>( units );
+            break;
+
+        default:
+            THROW_IO_ERROR( wxString::Format( "Unknown board units %d", units ) );
         }
 
         m_stream.Skip( 3 );
@@ -725,6 +732,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x0C( FILE_STREAM& aStream, FMT_VE
     ReadCond( aStream, aVer, data.m_Unknown_16x );
 
     data.m_Unknown4 = aStream.ReadU32();
+    ReadCond( aStream, aVer, data.m_Unknown5 );
 
     for( size_t i = 0; i < data.m_Coords.size(); ++i )
     {
@@ -736,12 +744,11 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x0C( FILE_STREAM& aStream, FMT_VE
         data.m_Size[i] = aStream.ReadS32();
     }
 
-    for( size_t i = 0; i < data.m_UnknownArray.size(); ++i )
-    {
-        data.m_UnknownArray[i] = aStream.ReadU32();
-    }
+    data.m_GroupPtr = aStream.ReadU32();
+    data.m_Unknown6 = aStream.ReadU32();
+    data.m_Unknown7 = aStream.ReadU32();
 
-    ReadCond( aStream, aVer, data.m_Unknown6 );
+    ReadCond( aStream, aVer, data.m_Unknown8 );
 
     return block;
 }
@@ -778,7 +785,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x0D_PAD( FILE_STREAM& aStream, FM
 
 static std::unique_ptr<BLOCK_BASE> ParseBlock_0x0E( FILE_STREAM& aStream, FMT_VER aVer )
 {
-    auto block = std::make_unique<BLOCK<BLK_0x0E_SHAPE_SEG>>( 0x0E, aStream.Position() );
+    auto block = std::make_unique<BLOCK<BLK_0x0E_RECT>>( 0x0E, aStream.Position() );
 
     auto& data = block->GetData();
 
@@ -804,6 +811,8 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x0E( FILE_STREAM& aStream, FMT_VE
     {
         data.m_UnknownArr[i] = aStream.ReadU32();
     }
+
+    data.m_Rotation = aStream.ReadU32();
 
     return block;
 }
@@ -1028,7 +1037,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x1C_PADSTACK( FILE_STREAM& aStrea
     }
 
     data.m_B = aStream.ReadU8();
-    data.m_C = aStream.ReadU8();
+    data.m_Flags = aStream.ReadU8();
     data.m_D = aStream.ReadU8();
 
     ReadCond( aStream, aVer, data.m_Unknown7 );
@@ -1049,13 +1058,20 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x1C_PADSTACK( FILE_STREAM& aStrea
     ReadArrayU32( aStream, data.m_DrillArr );
 
     ReadCond( aStream, aVer, data.m_SlotAndUnknownArr );
-    ReadCond( aStream, aVer, data.m_UnknownArr8_2 );
+    ReadCond( aStream, aVer, data.m_Unknown12 );
 
     // V180 has 8 extra uint32s between the fixed arrays and the component table
     ReadCond( aStream, aVer, data.m_V180Trailer );
 
-    // Work out how many fixed slots we have, and how many per-layer slots
-    data.m_NumFixedCompEntries = aVer < FMT_VER::V_172 ? 10 : 21;
+    // Work out how many fixed slots we have
+    if( aVer < FMT_VER::V_165 )
+        data.m_NumFixedCompEntries = 10;
+    else if( aVer < FMT_VER::V_172 )
+        data.m_NumFixedCompEntries = 11;
+    else
+        data.m_NumFixedCompEntries = 21;
+
+    // ...and how many per-layer slots
     data.m_NumCompsPerLayer = aVer < FMT_VER::V_172 ? 3 : 4;
 
     const size_t nComps = data.m_NumFixedCompEntries + ( data.m_LayerCount * data.m_NumCompsPerLayer );
@@ -1316,7 +1332,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x24_RECT( FILE_STREAM& aStream, F
 
     data.m_Unknown3 = aStream.ReadU32();
     data.m_Unknown4 = aStream.ReadU32();
-    data.m_Unknown5 = aStream.ReadU32();
+    data.m_Rotation = aStream.ReadU32();
 
     return block;
 }
@@ -1397,16 +1413,16 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x28_SHAPE( FILE_STREAM& aStream, 
 
     data.m_Ptr2 = aStream.ReadU32();
     data.m_Ptr3 = aStream.ReadU32();
-    data.m_Ptr4 = aStream.ReadU32();
+    data.m_FirstKeepoutPtr = aStream.ReadU32();
     data.m_FirstSegmentPtr = aStream.ReadU32();
     data.m_Unknown4 = aStream.ReadU32();
     data.m_Unknown5 = aStream.ReadU32();
 
-    ReadCond( aStream, aVer, data.m_Ptr7 );
+    ReadCond( aStream, aVer, data.m_TablePtr );
 
     data.m_Ptr6 = aStream.ReadU32();
 
-    ReadCond( aStream, aVer, data.m_Ptr7_16x );
+    ReadCond( aStream, aVer, data.m_TablePtr_16x );
 
     for( size_t i = 0; i < data.m_Coords.size(); ++i )
     {
@@ -1530,7 +1546,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x2C_TABLE( FILE_STREAM& aStream, 
     auto& data = block->GetData();
 
     data.m_Type = aStream.ReadU8();
-    data.m_T2 = aStream.ReadU16();
+    data.m_SubType = aStream.ReadU16();
     data.m_Key = aStream.ReadU32();
     data.m_Next = aStream.ReadU32();
 
@@ -1690,7 +1706,9 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x30_STR_WRAPPER( FILE_STREAM& aSt
     ReadCond( aStream, aVer, data.m_Unknown3 );
 
     data.m_StrGraphicPtr = aStream.ReadU32();
-    data.m_Unknown4 = aStream.ReadU32();
+
+    ReadCond( aStream, aVer, data.m_PtrGroup_17x );
+    ReadCond( aStream, aVer, data.m_Unknown4 );
 
     if( data.m_Font16x.exists( aVer ) )
     {
@@ -1705,7 +1723,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x30_STR_WRAPPER( FILE_STREAM& aSt
     data.m_Unknown5 = aStream.ReadU32();
     data.m_Rotation = aStream.ReadU32();
 
-    ReadCond( aStream, aVer, data.m_Ptr3_16x );
+    ReadCond( aStream, aVer, data.m_PtrGroup_16x );
 
     return block;
 }
@@ -1845,7 +1863,7 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x34_KEEPOUT( FILE_STREAM& aStream
     ReadCond( aStream, aVer, data.m_Unknown1 );
 
     data.m_Flags = aStream.ReadU32();
-    data.m_Ptr2 = aStream.ReadU32();
+    data.m_FirstSegmentPtr = aStream.ReadU32();
     data.m_Ptr3 = aStream.ReadU32();
     data.m_Unknown2 = aStream.ReadU32();
 
@@ -1895,9 +1913,21 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
                 data.m_NumItems, aStream.Position() ) );
     }
 
-    data.m_Items.reserve( data.m_NumItems );
+    if( data.m_Count > data.m_NumItems )
+    {
+        THROW_IO_ERROR( wxString::Format(
+                "Block 0x36 filled count %u exceeds capacity %u at offset %#010zx",
+                data.m_Count, data.m_NumItems, aStream.Position() ) );
+    }
+
+    // Each block has m_NumItems slots but only m_Count are populated; the rest are
+    // zeroes. Iterate all slots to stride across them correctly, but only keep the
+    // actual existing items.
+    data.m_Items.reserve( data.m_Count );
     for( uint32_t i = 0; i < data.m_NumItems; ++i )
     {
+        const bool keep = i < data.m_Count;
+
         switch( data.m_Code )
         {
         case 0x02:
@@ -1909,7 +1939,8 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
             ReadCond( aStream, aVer, item.m_Ys );
             ReadCond( aStream, aVer, item.m_Zs );
 
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x03:
@@ -1922,7 +1953,8 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
 
             ReadCond( aStream, aVer, item.m_Unknown1 );
 
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x05:
@@ -1930,8 +1962,10 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
             BLK_0x36_DEF_TABLE::X05 item;
 
             aStream.ReadBytes( item.m_Unknown.data(), item.m_Unknown.size() );
+            ReadCond( aStream, aVer, item.m_Unknown2 );
 
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x06:
@@ -1945,7 +1979,8 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
 
             ReadCond( aStream, aVer, item.m_Unknown2 );
 
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x08:
@@ -1958,31 +1993,40 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
             item.m_CharWidth = aStream.ReadU32();
 
             ReadCond( aStream, aVer, item.m_Unknown2 );
-            ReadArrayU32( aStream, item.m_Xs );
+
+            item.m_CharacterSpace = aStream.ReadU32();
+            item.m_LineSpace = aStream.ReadU32();
+            item.m_Unknown3 = aStream.ReadU32();
+            item.m_StrokeWidth = aStream.ReadU32();
+
             ReadCond( aStream, aVer, item.m_Ys );
 
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x0B:
         {
             BLK_0x36_DEF_TABLE::X0B item;
             aStream.ReadBytes( item.m_Unknown.data(), item.m_Unknown.size() );
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x0C:
         {
             BLK_0x36_DEF_TABLE::X0C item;
             aStream.ReadBytes( item.m_Unknown.data(), item.m_Unknown.size() );
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x0D:
         {
             BLK_0x36_DEF_TABLE::X0D item;
             aStream.ReadBytes( item.m_Unknown.data(), item.m_Unknown.size() );
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x0F:
@@ -1991,7 +2035,8 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
             item.m_Key = aStream.ReadU32();
             ReadArrayU32( aStream, item.m_Ptrs );
             item.m_Ptr2 = aStream.ReadU32();
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         case 0x10:
@@ -1999,7 +2044,17 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x36( FILE_STREAM& aStream, FMT_VE
             BLK_0x36_DEF_TABLE::X10 item;
             aStream.ReadBytes( item.m_Unknown.data(), item.m_Unknown.size() );
             ReadCond( aStream, aVer, item.m_Unknown2 );
-            data.m_Items.emplace_back( std::move( item ) );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
+            break;
+        }
+        case 0x12:
+        {
+            BLK_0x36_DEF_TABLE::X12 item;
+            // aStream.ReadBytes( item.m_Unknown.data(), item.m_Unknown.size() );
+            aStream.Skip( 1052 );
+            if( keep )
+                data.m_Items.emplace_back( std::move( item ) );
             break;
         }
         default: THROW_IO_ERROR( wxString::Format( "Unknown substruct type %#02x in block 0x36", data.m_Code ) );
@@ -2019,15 +2074,15 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x37( FILE_STREAM& aStream, FMT_VE
     data.m_T = aStream.ReadU8();
     data.m_T2 = aStream.ReadU16();
     data.m_Key = aStream.ReadU32();
-    data.m_Ptr1 = aStream.ReadU32();
-    data.m_Unknown1 = aStream.ReadU32();
+    data.m_GroupPtr = aStream.ReadU32();
+    data.m_Next = aStream.ReadU32();
     data.m_Capacity = aStream.ReadU32();
     data.m_Count = aStream.ReadU32();
     data.m_Unknown2 = aStream.ReadU32();
 
-    ReadArrayU32( aStream, data.m_Ptrs );
+    ReadCond( aStream, aVer, data.m_Unknown3 );
 
-    ReadCond( aStream, aVer, data.m_UnknownArr );
+    ReadArrayU32( aStream, data.m_Ptrs );
 
     return block;
 }
@@ -2161,8 +2216,6 @@ static std::unique_ptr<BLOCK_BASE> ParseBlock_0x3C( FILE_STREAM& aStream, FMT_VE
 
 std::unique_ptr<BLOCK_BASE> ALLEGRO::BLOCK_PARSER::ParseBlock( bool& aEndOfObjectsMarker )
 {
-    const size_t offset = m_stream.Position();
-
     // Read the type of the object
     // The file can end here without error.
     uint8_t type = 0x00;
@@ -2455,7 +2508,6 @@ std::unique_ptr<BLOCK_BASE> ALLEGRO::BLOCK_PARSER::ParseBlock( bool& aEndOfObjec
 
 void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
 {
-    const uint32_t magic = aBoard.m_Header->m_Magic;
     const FMT_VER  ver = aBoard.m_FmtVer;
 
     if( m_progressReporter )
@@ -2467,7 +2519,7 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
 
     BLOCK_PARSER blockParser( m_stream, ver, aBoard.m_Header->Get_0x27_End() );
 
-    auto lastRefresh = std::chrono::steady_clock::now();
+    THROTTLE refreshThrottle( std::chrono::milliseconds( 100 ) );
 
     while( true )
     {
@@ -2541,7 +2593,7 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
             {
                 THROW_IO_ERROR( wxString::Format(
                         "Do not have parser for block index %zu type %#02x available at offset %#010zx",
-                        aBoard.GetObjectCount(), blockTypeByte, offset ) );
+                        aBoard.GetObjectCount() + 1, blockTypeByte, offset ) );
             }
             else
             {
@@ -2555,13 +2607,10 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
         }
         else
         {
-            if( wxLog::IsAllowedTraceMask( traceAllegroParser ) )
-            {
-                wxLogTrace( traceAllegroParserBlocks,
-                            wxString::Format( "Added block %zu, type %#04x from %#010zx to %#010zx",
-                                              aBoard.GetObjectCount(), block->GetBlockType(), offset,
-                                              m_stream.Position() ) );
-            }
+            wxLogTrace( traceAllegroParserBlocks,
+                        wxString::Format( "Added block %zu, type %#04x from %#010zx to %#010zx",
+                                          aBoard.GetObjectCount(), block->GetBlockType(), offset,
+                                          m_stream.Position() ) );
 
             aBoard.InsertBlock( std::move( block ) );
 
@@ -2569,16 +2618,8 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
             {
                 m_progressReporter->AdvanceProgress();
 
-                if( ( aBoard.GetObjectCount() & 0x3F ) == 0 )
-                {
-                    auto now = std::chrono::steady_clock::now();
-
-                    if( now - lastRefresh >= std::chrono::milliseconds( 100 ) )
-                    {
-                        m_progressReporter->KeepRefreshing();
-                        lastRefresh = now;
-                    }
-                }
+                if( ( aBoard.GetObjectCount() & 0x3F ) == 0 && refreshThrottle.Ready() )
+                    m_progressReporter->KeepRefreshing();
             }
         }
     }
@@ -2586,21 +2627,16 @@ void ALLEGRO::PARSER::readObjects( BRD_DB& aBoard )
 
 
 template <typename T>
-void dumpLL( const char* name, const T& ll )
+void dumpLL( const char* name, const T& aLL )
 {
-    const auto dump = [&]( const FILE_HEADER::LINKED_LIST& ll )
-    {
-        wxLogTrace( traceAllegroParser, "  LL %-20s head=%#010x tail=%#010x", name, ll.m_Head, ll.m_Tail );
-    };
-
     if constexpr( std::is_same_v<T, FILE_HEADER::LINKED_LIST> )
     {
-        dump( ll );
+        wxLogTrace( traceAllegroParser, "  LL %-20s head=%#010x tail=%#010x", name, aLL.m_Head, aLL.m_Tail );
     }
-    else if constexpr( std::is_same_v<T, COND_FIELD_BASE<FILE_HEADER::LINKED_LIST>> )
+    else if constexpr( std::is_base_of_v<COND_FIELD_BASE<FILE_HEADER::LINKED_LIST>, T> )
     {
-        if( ll.has_value() )
-            dump( ll.value() );
+        if( aLL.has_value() )
+            dumpLL( name, aLL.value() );
     }
 }
 

@@ -172,7 +172,7 @@ private:
 template <FMT_VER MinVersion, typename T>
 struct COND_GE : public COND_FIELD_BASE<T>
 {
-    constexpr bool exists( FMT_VER ver ) const { return ver >= MinVersion; }
+    constexpr bool exists( FMT_VER ver ) const override { return ver >= MinVersion; }
 
     using COND_FIELD_BASE<T>::operator=;
 };
@@ -185,7 +185,7 @@ struct COND_GE : public COND_FIELD_BASE<T>
 template <FMT_VER MaxVersion, typename T>
 struct COND_LT : public COND_FIELD_BASE<T>
 {
-    constexpr bool exists( FMT_VER ver ) const { return ver < MaxVersion; }
+    constexpr bool exists( FMT_VER ver ) const override { return ver < MaxVersion; }
 
     using COND_FIELD_BASE<T>::operator=;
 };
@@ -193,12 +193,12 @@ struct COND_LT : public COND_FIELD_BASE<T>
 
 /**
  * This is a conditional field that only exists in versions of a file
- * less than a certain version.
+ * less than a certain version and greater than or equal to a certain version.
  */
 template <FMT_VER GEVersion, FMT_VER LTVersion, typename T>
 struct COND_GE_LT : public COND_FIELD_BASE<T>
 {
-    constexpr bool exists( FMT_VER ver ) const { return ver >= GEVersion && ver < LTVersion; }
+    constexpr bool exists( FMT_VER ver ) const override { return ver >= GEVersion && ver < LTVersion; }
 
     using COND_FIELD_BASE<T>::operator=;
 };
@@ -206,8 +206,11 @@ struct COND_GE_LT : public COND_FIELD_BASE<T>
 
 enum BOARD_UNITS
 {
-    IMPERIAL = 0x01,
-    METRIC = 0x03,
+    MILS = 0x01,
+    INCHES = 0x02,
+    MILLIMETERS = 0x03,
+    CENTIMETERS = 0x04,
+    MICROMETERS = 0x05,
 };
 
 
@@ -403,6 +406,7 @@ struct LAYER_INFO
         VIA_KEEPOUT          = 0x13,
         ANTI_ETCH            = 0x14,
         BOUNDARY             = 0x15,
+        CONSTRAINTS_REGION   = 0x16,
     };
 
     /**
@@ -413,7 +417,10 @@ struct LAYER_INFO
     enum SUBCLASS
     {
         // BOARD_GEOMETRY
-        BGEOM_CONSTRAINT_AREA        = 0xEB,
+        // BGEOM_PASTEMASK_BOTTOM     = 0x??
+        // BGEOM_PASTEMASK_TOP        = 0x??
+        BGEOM_OUTLINE                 = 0xEA,
+        BGEOM_CONSTRAINT_AREA         = 0xEB,
         BGEOM_OFF_GRID_AREA           = 0xEC,
         BGEOM_SOLDERMASK_BOTTOM       = 0xED,
         BGEOM_SOLDERMASK_TOP          = 0xEE,
@@ -431,7 +438,7 @@ struct LAYER_INFO
         BGEOM_TOOLING_CORNERS         = 0xFA,
         BGEOM_ASSEMBLY_NOTES          = 0xFB,
         BGEOM_PLATING_BAR             = 0xFC,
-        BGEOM_OUTLINE                 = 0xFD,
+        BGEOM_DESIGN_OUTLINE          = 0xFD,
 
         // COMPONENT_VALUE / DEVICE_TYPE / USER_PART_NUMBER
         // REF_DES / TOLERANCE
@@ -458,8 +465,10 @@ struct LAYER_INFO
         DFMT_OUTLINE                 = 0xFD,
 
         // PACKAGE_GEOMETRY
-        DFA_BOUND_BOTTOM             = 0xEE,
-        DFA_BOUND_TOP                = 0xEF,
+        PGEOM_PASTEMASK_BOTTOM       = 0xEC,
+        PGEOM_PASTEMASK_TOP          = 0xED,
+        PGEOM_DFA_BOUND_BOTTOM       = 0xEE,
+        PGEOM_DFA_BOUND_TOP          = 0xEF,
         PGEOM_DISPLAY_BOTTOM         = 0xF1,
         PGEOM_DISPLAY_TOP            = 0xF2,
         PGEOM_SOLDERMASK_BOTTOM      = 0xF3,
@@ -475,6 +484,7 @@ struct LAYER_INFO
         PGEOM_ASSEMBLY_TOP           = 0xFD,
 
         // MANUFACTURING
+        MFR_XSECTION_CHART           = 0xF0,
         MFR_NO_PROBE_BOTTOM          = 0xF1,
         MFR_NO_PROBE_TOP             = 0xF2,
         MFR_AUTOSILK_BOTTOM          = 0xF3,
@@ -488,6 +498,17 @@ struct LAYER_INFO
         MFR_NO_GLOSS_TOP             = 0xFB,
         MFR_NO_GLOSS_ALL             = 0xFC,
         MFR_PHOTOPLOT_OUTLINE        = 0xFD,
+
+        // CONSTRAINTS_REGION
+        CREG_ALL                     = 0xFD,
+
+        // PACKAGE_KEEPIN / ROUTE_KEEPIN
+        KEEPIN_ALL                   = 0xFD,
+
+        // PACKAGE_KEEPOUT / ROUTE_KEEPOUT / VIA_KEEPOUT
+        KEEPOUT_BOTTOM               = 0xFB,
+        KEEPOUT_TOP                  = 0xFC,
+        KEEPOUT_ALL                  = 0xFD,
     };
 
     uint8_t m_Class;
@@ -711,6 +732,11 @@ struct BLK_0x08_PIN_NUMBER
     COND_GE<FMT_VER::V_172, uint32_t> m_Unknown1;
 
     uint32_t m_Ptr4;
+
+    uint32_t GetStrPtr() const
+    {
+        return m_StrPtr.value_or( m_StrPtr16x.value_or( 0 ) );
+    }
 };
 
 
@@ -763,6 +789,23 @@ struct BLK_0x0A_DRC
  */
 struct BLK_0x0C_PIN_DEF
 {
+    enum MARKER_SHAPE
+    {
+        // These are in the same order as the pad shapes, at least for the 'simple' shapes
+        CIRCLE = 0x02,
+        OCTAGON = 0x03,
+        CROSS = 0x04,
+        SQUARE = 0x05,
+        RECTANGLE = 0x06,
+        DIAMOND = 0x07,
+        PENTAGON = 0x0a,
+        OBLONG_X = 0x0b,
+        OBLONG_Y = 0x0c,
+        HEXAGON_X = 0x0f,
+        HEXAGON_Y = 0x10,
+        TRIANGLE = 0x12,
+    };
+
     uint8_t    m_T;
     LAYER_INFO m_Layer;
     uint32_t m_Key;
@@ -781,12 +824,21 @@ struct BLK_0x0C_PIN_DEF
 
     uint32_t m_Unknown4;
 
+    COND_GE<FMT_VER::V_180, uint32_t> m_Unknown5;
+
     std::array<int32_t, 2> m_Coords;
     std::array<int32_t, 2> m_Size;
 
-    std::array<uint32_t, 3> m_UnknownArray;
+    uint32_t m_GroupPtr;
+    uint32_t m_Unknown6;
+    uint32_t m_Unknown7;
 
-    COND_GE<FMT_VER::V_174, uint32_t> m_Unknown6;
+    COND_GE_LT<FMT_VER::V_174, FMT_VER::V_180, uint32_t> m_Unknown8;
+
+    uint32_t GetShape() const
+    {
+        return m_Shape16x.value_or( m_Shape.value_or( 0 ) );
+    }
 };
 
 
@@ -817,10 +869,9 @@ struct BLK_0x0D_PAD
 
 
 /**
- * Shape/fill segment linking a copper shape to its parent footprint. Contains coordinates
- * and parent pointer.
+ * Rectangular shape.
  */
-struct BLK_0x0E_SHAPE_SEG
+struct BLK_0x0E_RECT
 {
     uint8_t  m_T;
     LAYER_INFO m_Layer;
@@ -837,7 +888,9 @@ struct BLK_0x0E_SHAPE_SEG
 
     std::array<int32_t, 4> m_Coords;
 
-    std::array<uint32_t, 4> m_UnknownArr;
+    std::array<uint32_t, 3> m_UnknownArr;
+    /// Rotation in millidegrees
+    uint32_t m_Rotation;
 };
 
 
@@ -1087,6 +1140,16 @@ struct PADSTACK_COMPONENT
  */
 struct BLK_0x1C_PADSTACK
 {
+    /**
+     * Pad flags are founds in a byte of the pad info
+     */
+    enum PAD_FLAGS
+    {
+        // Some through-holes have this, some don't
+        FLAG_UNKNOWN1   = 0x01,
+        FLAG_PLATED     = 0x20,
+    };
+
     uint8_t m_UnknownByte1;
 
     /**
@@ -1117,7 +1180,8 @@ struct BLK_0x1C_PADSTACK
     // Only lower 4 bits (top 4 are type)
     uint8_t m_A;
     uint8_t m_B;
-    uint8_t m_C;
+    /// Mask of @c PAD_FLAGS values
+    uint8_t m_Flags;
     uint8_t m_D;
 
     COND_GE<FMT_VER::V_172, uint32_t> m_Unknown7;
@@ -1145,10 +1209,12 @@ struct BLK_0x1C_PADSTACK
      * in internal coordinate units. For routed slots (round drill bit routed along a path),
      * m_DrillArr holds only the bit diameter while this array holds the full slot envelope.
      * For punched oblong drills, these values match m_DrillArr[4] and [7].
+     *
+     * This probably also holds secondary drill parameters and other new V17.2 features.
      */
     COND_GE<FMT_VER::V_172, std::array<uint32_t, 28>> m_SlotAndUnknownArr;
 
-    COND_GE_LT<FMT_VER::V_165, FMT_VER::V_172, std::array<uint32_t, 8>> m_UnknownArr8_2;
+    COND_GE_LT<FMT_VER::V_165, FMT_VER::V_172, uint32_t> m_Unknown12;
 
     /**
      * V180 inserts 8 extra uint32s between the fixed arrays and the component table.
@@ -1164,12 +1230,18 @@ struct BLK_0x1C_PADSTACK
      *
      * All fixed slots are technical layers (solder mask, paste mask, film mask,
      * assembly variant, etc). The exact slot-to-layer mapping is version-dependent
-     * and not fully contiguous. Verified mappings from WORKLOG reverse engineering:
+     * and not fully contiguous.
      *
-     * V<172 (10 fixed):
+     * V<165 (10 fixed)
      *   Slot 0  = ~TSM (top solder mask)
      *   Slot 5  = ~TPM (top paste mask)
      *   Slot 7  = ~TFM (top film mask)
+     *
+     * V<172 (11 fixed):
+     *   Slot 0  = ??? (looks the same size as a solder mask)
+     *   Slot 1  = ~TSM (top solder mask)
+     *   Slot 6  = ~TPM (top paste mask)
+     *   Slot 8  = ~TFM (top film mask)
      *
      * V>=172 (21 fixed):
      *   Slot 14 = ~TSM (top solder mask)
@@ -1210,7 +1282,7 @@ struct BLK_0x1C_PADSTACK
      * *  < 17.2: 10 + layer_count * 3
      * * >= 17.2: 21 + layer_count * 4
      *
-     * The first 10/21 components seem to be a fixed set of technical layers.
+     * The first 10/11/21 components seem to be a fixed set of technical layers.
      *
      * Then, a set of groups of 3/4 components for each layer.
      */
@@ -1356,7 +1428,7 @@ struct BLK_0x22_UNKNOWN
     uint16_t m_T2;
     uint32_t m_Key;
 
-    COND_GE<FMT_VER::V_174, uint32_t> m_Unknown1;
+    COND_GE<FMT_VER::V_172, uint32_t> m_Unknown1;
 
     std::array<uint32_t, 8> m_UnknownArray;
 };
@@ -1391,6 +1463,8 @@ struct BLK_0x23_RATLINE
 /**
  * Rectangle defined by four coordinates. Appears on the m_LL_0x24_0x28 header linked
  * list for keepout areas and other rectangular regions. Has a layer and parent pointer.
+ *
+ * Not entirely clear how this differs from 0x0E yet.
  */
 struct BLK_0x24_RECT
 {
@@ -1409,7 +1483,8 @@ struct BLK_0x24_RECT
 
     uint32_t m_Unknown3;
     uint32_t m_Unknown4;
-    uint32_t m_Unknown5;
+    /// Rotation in millidegrees
+    uint32_t m_Rotation;
 };
 
 
@@ -1470,18 +1545,23 @@ struct BLK_0x28_SHAPE
 
     uint32_t m_Ptr2;
     uint32_t m_Ptr3;
-    uint32_t m_Ptr4;
+    uint32_t m_FirstKeepoutPtr;
     uint32_t m_FirstSegmentPtr;
     uint32_t m_Unknown4;
     uint32_t m_Unknown5;
 
-    COND_GE<FMT_VER::V_172, uint32_t> m_Ptr7;
+    COND_GE<FMT_VER::V_172, uint32_t> m_TablePtr;
 
     uint32_t m_Ptr6;
 
-    COND_LT<FMT_VER::V_172, uint32_t> m_Ptr7_16x;
+    COND_LT<FMT_VER::V_172, uint32_t> m_TablePtr_16x;
 
     std::array<int32_t, 4> m_Coords;
+
+    uint32_t GetTablePtr() const
+    {
+        return m_TablePtr.value_or( m_TablePtr_16x.value_or( 0 ) );
+    }
 };
 
 
@@ -1586,8 +1666,36 @@ struct BLK_0x2B_FOOTPRINT_DEF
  */
 struct BLK_0x2C_TABLE
 {
+    /**
+     * The subtype of a table.
+     *
+     * Not all of these are clear, but these are the ones that have been observed so far.
+     */
+    enum SUBTYPE
+    {
+        SUBTYPE_UNKNOWN = 0,
+
+        SUBTYPE_0x05 = 0x05,
+
+        SUBTYPE_0x06 = 0x06,
+        SUBTYPE_0x0c = 0x0c,
+        SUBTYPE_0x15 = 0x15,
+        SUBTYPE_0x16 = 0x16,
+        SUBTYPE_0x20 = 0x20,
+        SUBTYPE_0x23 = 0x23,
+
+        /// Some kind of net match group
+        SUBTYPE_0x102 = 0x102,
+        /// Diff pair
+        SUBTYPE_0x103 = 0x103,
+        SUBTYPE_0x107 = 0x107,
+
+        /// Used for drill charts and x-section charts
+        SUBTYPE_GRAPHICAL_GROUP = 0x110,
+    };
+
     uint8_t  m_Type;
-    uint16_t m_T2;
+    uint16_t m_SubType;
     uint32_t m_Key;
     uint32_t m_Next;
 
@@ -1651,6 +1759,11 @@ struct BLK_0x2D_FOOTPRINT_INST
     uint32_t m_AreasPtr;
     uint32_t m_UnknownPtr1;
     uint32_t m_UnknownPtr2;
+
+    uint32_t GetInstRef() const
+    {
+        return m_InstRef.value_or( m_InstRef16x.value_or( 0 ) );
+    }
 };
 
 
@@ -1731,7 +1844,9 @@ struct BLK_0x30_STR_WRAPPER
     COND_GE<FMT_VER::V_174, uint32_t>        m_Unknown3;
 
     uint32_t m_StrGraphicPtr;
-    uint32_t m_Unknown4;
+
+    COND_GE<FMT_VER::V_172, uint32_t> m_PtrGroup_17x;
+    COND_LT<FMT_VER::V_172, uint32_t> m_Unknown4;
 
     COND_LT<FMT_VER::V_172, TEXT_PROPERTIES> m_Font16x;
 
@@ -1743,7 +1858,12 @@ struct BLK_0x30_STR_WRAPPER
     uint32_t m_Unknown5;
     uint32_t m_Rotation;  ///< Millidegrees
 
-    COND_LT<FMT_VER::V_172, uint32_t> m_Ptr3_16x;
+    COND_LT<FMT_VER::V_172, uint32_t> m_PtrGroup_16x;
+
+    uint32_t GetGroupPtr() const
+    {
+        return m_PtrGroup_17x.value_or( m_PtrGroup_16x.value_or( 0 ) );
+    }
 };
 
 
@@ -1864,7 +1984,7 @@ struct BLK_0x34_KEEPOUT
     COND_GE<FMT_VER::V_172, uint32_t> m_Unknown1;
 
     uint32_t m_Flags;
-    uint32_t m_Ptr2;
+    uint32_t m_FirstSegmentPtr;
     uint32_t m_Ptr3;
     uint32_t m_Unknown2;
 };
@@ -1922,6 +2042,9 @@ struct BLK_0x36_DEF_TABLE
     struct X05
     {
         std::array<uint8_t, 28> m_Unknown;
+
+        // This is in Nvidia Jetson (17.4), not in EVK BaseBoard (17.2)
+        COND_GE<FMT_VER::V_174, uint32_t> m_Unknown2;
     };
 
     struct X06
@@ -1943,7 +2066,10 @@ struct BLK_0x36_DEF_TABLE
 
         COND_GE<FMT_VER::V_174, uint32_t> m_Unknown2;
 
-        std::array<uint32_t, 4> m_Xs;
+        uint32_t m_CharacterSpace;
+        uint32_t m_LineSpace;
+        uint32_t m_Unknown3;    // Always 0?
+        uint32_t m_StrokeWidth; // Aka "photo width"
 
         COND_GE<FMT_VER::V_172, std::array<uint32_t, 8>> m_Ys;
     };
@@ -1978,7 +2104,14 @@ struct BLK_0x36_DEF_TABLE
         COND_GE<FMT_VER::V_180, uint32_t> m_Unknown2;
     };
 
-    using SubstructVariant = std::variant<X02, X03, X05, X06, FontDef_X08, X0B, X0C, X0D, X0F, X10>;
+    // So far only seen in a V175 file (Jetson)
+    struct X12
+    {
+        // No point reading this before we can use it
+        // std::array<uint8_t, 1052> m_Unknown;
+    };
+
+    using SubstructVariant = std::variant<X02, X03, X05, X06, FontDef_X08, X0B, X0C, X0D, X0F, X10, X12>;
 
     std::vector<SubstructVariant> m_Items;
 };
@@ -1994,15 +2127,15 @@ struct BLK_0x37_PTR_ARRAY
     uint8_t  m_T;
     uint16_t m_T2;
     uint32_t m_Key;
-    uint32_t m_Ptr1;
-    uint32_t m_Unknown1;
+    uint32_t m_GroupPtr;
+    uint32_t m_Next;
     uint32_t m_Capacity;
     uint32_t m_Count;
     uint32_t m_Unknown2;
 
-    std::array<uint32_t, 100> m_Ptrs;
+    COND_GE<FMT_VER::V_174, uint32_t> m_Unknown3;
 
-    COND_GE<FMT_VER::V_174, uint32_t> m_UnknownArr;
+    std::array<uint32_t, 100> m_Ptrs;
 };
 
 

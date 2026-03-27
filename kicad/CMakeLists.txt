@@ -88,6 +88,13 @@ set( KICAD_CLI_SRCS
     jobs_runner.cpp
     )
 
+if( KICAD_IPC_API )
+    set( KICAD_CLI_SRCS
+        ${KICAD_CLI_SRCS}
+        cli/command_api_server.cpp
+    )
+endif()
+
 if( WIN32 )
     if( MINGW )
         # KICAD_RESOURCES variable is set by the macro.
@@ -224,24 +231,15 @@ if( APPLE )
 
     set( SPICE_HELPER "1" )
 
-    if( PYTHON_FRAMEWORK )
-        set( PYTHON_FRAMEWORK_HELPER "1" )
-    else()
-        set( PYTHON_FRAMEWORK_HELPER "0" )
-    endif()
-
-    set_target_properties( kicad PROPERTIES BUILD_RPATH ${PYTHON_FRAMEWORK} )
     set_target_properties( kicad PROPERTIES INSTALL_RPATH
-            "@executable_path/../Frameworks;@executable_path/../Frameworks/Python.framework" )
-    set_target_properties( kicad-cli PROPERTIES BUILD_RPATH ${PYTHON_FRAMEWORK} )
+            "@executable_path/../Frameworks" )
     set_target_properties( kicad-cli PROPERTIES INSTALL_RPATH
-            "@executable_path/../Frameworks;@executable_path/../Frameworks/Python.framework" )
+            "@executable_path/../Frameworks" )
 
     install( CODE "
         set( KICAD_CMAKE_MODULE_PATH \"${KICAD_CMAKE_MODULE_PATH}\" )
         set( OSX_BUNDLE_INSTALL_BIN_DIR \"${OSX_BUNDLE_INSTALL_BIN_DIR}\" )
         set( OSX_BUNDLE_INSTALL_LIB_DIR \"${OSX_BUNDLE_INSTALL_LIB_DIR}\" )
-        set( PYTHON_FRAMEWORK \"${PYTHON_FRAMEWORK}\" )
     " )
 
     install( CODE [[
@@ -252,10 +250,6 @@ if( APPLE )
             ""
             ""
             )
-
-        # Now install Python framework properly (GET_RUNTIME_DEPENDENCIES can't do this)
-        execute_process( COMMAND rm ${OSX_BUNDLE_INSTALL_LIB_DIR}/Python )
-        execute_process( COMMAND cp -RP ${PYTHON_FRAMEWORK} ${OSX_BUNDLE_INSTALL_LIB_DIR}/ )
     ]] )
 
     # move all individual app bundles into main bundle
@@ -284,7 +278,7 @@ if( APPLE )
         move_to_main_bundle( \"pl_editor.app\" \"Page Layout Editor.app\" )
 
         cmake_policy( SET CMP0012 NEW )
-        if ( ${PYTHON_FRAMEWORK_HELPER} AND ${KICAD_APPLE_MAKE_RELOCATEABLE_BUNDLE} )
+        if ( ${KICAD_APPLE_MAKE_RELOCATEABLE_BUNDLE} )
             message( STATUS \"Making the finished bundle relocateable...\" )
             include( ${KICAD_CMAKE_MODULE_PATH}/InstallSteps/RefixupMacOS.cmake )
             refix_kicad_bundle( ${OSX_BUNDLE_INSTALL_DIR} )

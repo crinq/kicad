@@ -180,6 +180,9 @@ set( EESCHEMA_DLGS
     dialogs/dialog_update_symbol_fields_base.cpp
     dialogs/dialog_wire_bus_properties.cpp
     dialogs/dialog_wire_bus_properties_base.cpp
+    remote_symbol_download_manager.cpp
+    remote_symbol_import_job.cpp
+    remote_symbol_import_utils.cpp
     dialogs/panel_bom_presets.cpp
     dialogs/panel_bom_presets_base.cpp
     dialogs/panel_eeschema_color_settings.cpp
@@ -493,6 +496,8 @@ if( KICAD_IPC_API )
     set( EESCHEMA_SRCS
         ${EESCHEMA_SRCS}
         api/api_handler_sch.cpp
+        api/headless_sch_context.cpp
+        api/sch_context.cpp
     )
 endif()
 
@@ -603,8 +608,9 @@ if( KICAD_USE_PCH )
             <unordered_map>
             <core/json_serializers.h>
             <sch_edit_frame.h>
-            <string_utils.h>
             <schematic.h>
+            <sim/sim_model.h>
+            <string_utils.h>
             <pgm_base.h>
             <wx/wx.h> )
 endif()
@@ -643,7 +649,6 @@ target_link_libraries( eeschema_kiface
         pads_common
         pcm
         markdown_lib
-        scripting
         core
         Boost::headers
         ${wxWidgets_LIBRARIES}
@@ -697,10 +702,10 @@ if( APPLE )
         )
 
     set_target_properties( eeschema PROPERTIES INSTALL_RPATH
-            "@executable_path/../Frameworks;@executable_path/../Frameworks/Python.framework" )
+            "@executable_path/../Frameworks" )
 
     set_target_properties( eeschema_kiface PROPERTIES INSTALL_RPATH
-            "@executable_path/../Frameworks;@executable_path/../Frameworks/Python.framework" )
+            "@executable_path/../Frameworks" )
     set_target_properties( eeschema_kiface PROPERTIES BUILD_WITH_INSTALL_RPATH 1 )
 
     # put individual bundle outside of main bundle as a first step

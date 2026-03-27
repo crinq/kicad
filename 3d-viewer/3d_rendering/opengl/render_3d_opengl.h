@@ -25,6 +25,8 @@
 #ifndef RENDER_3D_OPENGL_H
 #define RENDER_3D_OPENGL_H
 
+#include <kicad_gl/kiglad.h> // Must be included first
+
 #include "../render_3d_base.h"
 #include "layer_triangles.h"
 #include "3d_spheres_gizmo.h"
@@ -42,6 +44,7 @@
 #include "3d_canvas/multi_pcb_transform.h"
 
 #include <geometry/eda_angle.h>
+#include <pad.h> // For PAD_DRILL_POST_MACHINING_MODE
 
 #include <map>
 
@@ -177,6 +180,7 @@ private:
      */
     void load3dModels( REPORTER* aStatusReporter );
 
+    void createPlaceholderModel();
     struct MODELTORENDER
     {
         glm::mat4 m_modelWorldMat;
@@ -198,6 +202,10 @@ private:
         {
         }
     };
+
+    void renderPlaceholderForFootprint( std::list<MODELTORENDER>& aDstRenderList, const glm::mat4& aFpMatrix,
+                                        const FOOTPRINT* aFootprint, bool aRenderTransparentOnly, bool aIsSelected,
+                                        float aOpacity );
 
     void renderOpaqueModels( const glm::mat4 &aCameraViewMatrix );
     void renderTransparentModels( const glm::mat4 &aCameraViewMatrix );
@@ -300,6 +308,7 @@ private:
     SHAPE_POLY_SET m_antiBoardPolys; ///< The negative polygon representation of the board
                                      ///< outline.
     SPHERES_GIZMO* m_spheres_gizmo;
+    MODEL_3D*      m_placeholderModel = nullptr;
 
     // Per-area display lists for multi-PCB transforms
     // Key: area index (-1 = no area / identity transform)

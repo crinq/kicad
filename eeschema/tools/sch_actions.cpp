@@ -358,6 +358,18 @@ TOOL_ACTION SCH_ACTIONS::showHiddenFields( TOOL_ACTION_ARGS()
         .ToolbarState( TOOLBAR_STATE::TOGGLE )
         .Icon( BITMAPS::text_sketch ) );
 
+TOOL_ACTION SCH_ACTIONS::previousSymbol( TOOL_ACTION_ARGS()
+        .Name( "eeschema.SymbolLibraryControl.previousSymbol" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Display previous symbol" ) )
+        .Icon( BITMAPS::lib_previous ) );
+
+TOOL_ACTION SCH_ACTIONS::nextSymbol( TOOL_ACTION_ARGS()
+        .Name( "eeschema.SymbolLibraryControl.nextSymbol" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Display next symbol" ) )
+        .Icon( BITMAPS::lib_next ) );
+
 
 // SYMBOL_EDITOR_DRAWING_TOOLS
 //
@@ -1067,7 +1079,7 @@ TOOL_ACTION SCH_ACTIONS::setExcludeFromBOM( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Exclude from Bill of Materials" ) )
         .Tooltip( _( "Set the exclude from bill of materials attribute" ) ) );
 
-TOOL_ACTION SCH_ACTIONS::setExcludeFromSimulation( TOOL_ACTION_ARGS()
+TOOL_ACTION SCH_ACTIONS::setExcludeFromSim( TOOL_ACTION_ARGS()
         .Name( "eeschema.EditorControl.setExcludeFromSimulation" )
         .Scope( AS_GLOBAL )
         .FriendlyName( _( "Exclude from Simulation" ) )

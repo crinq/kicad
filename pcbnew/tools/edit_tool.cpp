@@ -43,6 +43,7 @@
 #include <pcb_table.h>
 #include <pcb_generator.h>
 #include <zone.h>
+#include <pad.h>
 #include <pcb_edit_frame.h>
 #include <drawing_sheet/ds_proxy_view_item.h>
 #include <kiway.h>
@@ -2990,7 +2991,7 @@ void EDIT_TOOL::DeleteItems( const PCB_SELECTION& aItems, bool aIsCut )
         {
             PCB_GENERATOR* generator = static_cast<PCB_GENERATOR*>( board_item );
 
-            if( SELECTION_CONDITIONS::OnlyTypes( { PCB_GENERATOR_T } ) )
+            if( ( SELECTION_CONDITIONS::OnlyTypes( { PCB_GENERATOR_T } ) )( aItems ) )
             {
                 m_toolMgr->RunSynchronousAction<PCB_GENERATOR*>( PCB_ACTIONS::genRemove, &commit, generator );
                 commit.Push( _( "Delete" ), commitFlags );
@@ -3280,6 +3281,11 @@ int EDIT_TOOL::Duplicate( const TOOL_EVENT& aEvent )
                 // Clear the selection flag here, otherwise the PCB_SELECTION_TOOL
                 // will not properly select it later on
                 dupe_item->ClearSelected();
+
+                if( dupe_item->Type() == PCB_SHAPE_T && static_cast<PCB_SHAPE*>( dupe_item )->IsHatchedFill() )
+                {
+                    dupe_item->SetFlags( IS_NEW );
+                }
 
                 new_items.push_back( dupe_item );
                 commit.Add( dupe_item );

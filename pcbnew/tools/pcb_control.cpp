@@ -1832,12 +1832,12 @@ bool PCB_CONTROL::placeBoardItems( BOARD_COMMIT* aCommit, std::vector<BOARD_ITEM
     {
         if( aIsNew )
         {
-            const_cast<KIID&>( item->m_Uuid ) = KIID();
+            item->ResetUuid();
 
             item->RunOnChildren(
                     []( BOARD_ITEM* aChild )
                     {
-                        const_cast<KIID&>( aChild->m_Uuid ) = KIID();
+                        aChild->ResetUuid();
                     },
                     RECURSE_MODE::RECURSE );
 
@@ -2784,10 +2784,10 @@ int PCB_CONTROL::PlaceStackup( const TOOL_EVENT& aEvent )
 
 int PCB_CONTROL::FlipPcbView( const TOOL_EVENT& aEvent )
 {
-    view()->SetMirror( !view()->IsMirroredX(), false );
-    view()->RecacheAllItems();
-    m_frame->GetCanvas()->ForceRefresh();
-    m_frame->OnDisplayOptionsChanged();
+    PCB_DISPLAY_OPTIONS opts = m_frame->GetDisplayOptions();
+    opts.m_FlipBoardView = !opts.m_FlipBoardView;
+    m_frame->SetDisplayOptions( opts );
+
     return 0;
 }
 

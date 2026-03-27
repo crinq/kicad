@@ -300,9 +300,6 @@ KICAD_MANAGER_FRAME::KICAD_MANAGER_FRAME( wxWindow* parent, const wxString& titl
     m_acceptedExts.emplace( FILEEXT::DrillFileExtension, &KICAD_MANAGER_ACTIONS::viewDroppedGerbers );
 
     DragAcceptFiles( true );
-
-    // Ensure the window is on top
-    Raise();
 }
 
 
@@ -1279,9 +1276,9 @@ void KICAD_MANAGER_FRAME::ProjectChanged()
     // Register project file saver. Ensures project file participates in
     // autosave history commits without affecting dirty state.
     Kiway().LocalHistory().RegisterSaver( &Prj(),
-            [this]( const wxString& aProjectPath, std::vector<wxString>& aFiles )
+            [this]( const wxString& aProjectPath, std::vector<HISTORY_FILE_DATA>& aFileData )
             {
-                Prj().SaveToHistory( aProjectPath, aFiles );
+                Prj().SaveToHistory( aProjectPath, aFileData );
             } );
 }
 

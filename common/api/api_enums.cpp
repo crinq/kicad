@@ -21,13 +21,17 @@
 #include <import_export.h>
 #include <api/common/types/enums.pb.h>
 #include <api/board/board_types.pb.h>
+#include <api/schematic/schematic_jobs.pb.h>
 #include <api/schematic/schematic_types.pb.h>
 
 #include <core/typeinfo.h>
 #include <font/text_attributes.h>
+#include <jobs/job_export_sch_netlist.h>
+#include <jobs/job_export_sch_plot.h>
 #include <layer_ids.h>
 #include <pin_type.h>
 #include <stroke_params.h>
+#include <widgets/report_severity.h>
 
 using namespace kiapi;
 using namespace kiapi::common;
@@ -401,6 +405,94 @@ schematic::types::SchematicLayer ToProtoEnum( SCH_LAYER_ID aValue )
 
 
 template<>
+JOB_PAGE_SIZE FromProtoEnum( schematic::jobs::SchematicJobPageSize aValue )
+{
+    switch( aValue )
+    {
+    case schematic::jobs::SchematicJobPageSize::SJPS_AUTO: return JOB_PAGE_SIZE::PAGE_SIZE_AUTO;
+    case schematic::jobs::SchematicJobPageSize::SJPS_A4:   return JOB_PAGE_SIZE::PAGE_SIZE_A4;
+    case schematic::jobs::SchematicJobPageSize::SJPS_A:    return JOB_PAGE_SIZE::PAGE_SIZE_A;
+    case schematic::jobs::SchematicJobPageSize::SJPS_UNKNOWN:
+    default:
+        wxCHECK_MSG( false, JOB_PAGE_SIZE::PAGE_SIZE_AUTO,
+                     "Unhandled case in FromProtoEnum<schematic::jobs::SchematicJobPageSize>" );
+    }
+}
+
+
+template<>
+schematic::jobs::SchematicJobPageSize ToProtoEnum( JOB_PAGE_SIZE aValue )
+{
+    switch( aValue )
+    {
+    case JOB_PAGE_SIZE::PAGE_SIZE_AUTO: return schematic::jobs::SchematicJobPageSize::SJPS_AUTO;
+    case JOB_PAGE_SIZE::PAGE_SIZE_A4:   return schematic::jobs::SchematicJobPageSize::SJPS_A4;
+    case JOB_PAGE_SIZE::PAGE_SIZE_A:    return schematic::jobs::SchematicJobPageSize::SJPS_A;
+    default:
+        wxCHECK_MSG( false, schematic::jobs::SchematicJobPageSize::SJPS_UNKNOWN,
+                     "Unhandled case in ToProtoEnum<JOB_PAGE_SIZE>" );
+    }
+}
+
+
+template<>
+JOB_EXPORT_SCH_NETLIST::FORMAT FromProtoEnum( schematic::jobs::SchematicNetlistFormat aValue )
+{
+    switch( aValue )
+    {
+    case schematic::jobs::SchematicNetlistFormat::SNF_KICAD_XML:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::KICADXML;
+    case schematic::jobs::SchematicNetlistFormat::SNF_KICAD_SEXPR:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::KICADSEXPR;
+    case schematic::jobs::SchematicNetlistFormat::SNF_ORCAD_PCB2:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::ORCADPCB2;
+    case schematic::jobs::SchematicNetlistFormat::SNF_CADSTAR:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::CADSTAR;
+    case schematic::jobs::SchematicNetlistFormat::SNF_SPICE:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::SPICE;
+    case schematic::jobs::SchematicNetlistFormat::SNF_SPICE_MODEL:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::SPICEMODEL;
+    case schematic::jobs::SchematicNetlistFormat::SNF_PADS:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::PADS;
+    case schematic::jobs::SchematicNetlistFormat::SNF_ALLEGRO:
+        return JOB_EXPORT_SCH_NETLIST::FORMAT::ALLEGRO;
+    case schematic::jobs::SchematicNetlistFormat::SNF_UNKNOWN:
+    default:
+        wxCHECK_MSG( false, JOB_EXPORT_SCH_NETLIST::FORMAT::KICADXML,
+                     "Unhandled case in FromProtoEnum<schematic::jobs::SchematicNetlistFormat>" );
+    }
+}
+
+
+template<>
+schematic::jobs::SchematicNetlistFormat ToProtoEnum( JOB_EXPORT_SCH_NETLIST::FORMAT aValue )
+{
+    switch( aValue )
+    {
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::KICADXML:
+        return schematic::jobs::SchematicNetlistFormat::SNF_KICAD_XML;
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::KICADSEXPR:
+        return schematic::jobs::SchematicNetlistFormat::SNF_KICAD_SEXPR;
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::ORCADPCB2:
+        return schematic::jobs::SchematicNetlistFormat::SNF_ORCAD_PCB2;
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::CADSTAR:
+        return schematic::jobs::SchematicNetlistFormat::SNF_CADSTAR;
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::SPICE:
+        return schematic::jobs::SchematicNetlistFormat::SNF_SPICE;
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::SPICEMODEL:
+        return schematic::jobs::SchematicNetlistFormat::SNF_SPICE_MODEL;
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::PADS:
+        return schematic::jobs::SchematicNetlistFormat::SNF_PADS;
+    case JOB_EXPORT_SCH_NETLIST::FORMAT::ALLEGRO:
+        return schematic::jobs::SchematicNetlistFormat::SNF_ALLEGRO;
+    default:
+        wxCHECK_MSG( false, schematic::jobs::SchematicNetlistFormat::SNF_UNKNOWN,
+                     "Unhandled case in ToProtoEnum<JOB_EXPORT_SCH_NETLIST::FORMAT>" );
+    }
+}
+
+
+template<>
 GR_TEXT_H_ALIGN_T FromProtoEnum( types::HorizontalAlignment aValue )
 {
     switch( aValue )
@@ -552,5 +644,44 @@ types::ElectricalPinType ToProtoEnum( ELECTRICAL_PINTYPE aValue )
     default:
         wxCHECK_MSG( false, types::ElectricalPinType::EPT_UNKNOWN,
                      "Unhandled case in ToProtoEnum<ELECTRICAL_PINTYPE>");
+    }
+}
+
+
+template<>
+types::RuleSeverity ToProtoEnum( SEVERITY aValue )
+{
+    switch( aValue )
+    {
+    case RPT_SEVERITY_WARNING:   return types::RuleSeverity::RS_WARNING;
+    case RPT_SEVERITY_ERROR:     return types::RuleSeverity::RS_ERROR;
+    case RPT_SEVERITY_EXCLUSION: return types::RuleSeverity::RS_EXCLUSION;
+    case RPT_SEVERITY_IGNORE:    return types::RuleSeverity::RS_IGNORE;
+    case RPT_SEVERITY_INFO:      return types::RuleSeverity::RS_INFO;
+    case RPT_SEVERITY_ACTION:    return types::RuleSeverity::RS_ACTION;
+    case RPT_SEVERITY_DEBUG:     return types::RuleSeverity::RS_DEBUG;
+    case RPT_SEVERITY_UNDEFINED: return types::RuleSeverity::RS_UNDEFINED;
+    default:
+        wxCHECK_MSG( false, types::RuleSeverity::RS_UNDEFINED,
+                     "Unhandled case in ToProtoEnum<SEVERITY>");
+    }
+}
+
+
+template<>
+SEVERITY FromProtoEnum( types::RuleSeverity aValue )
+{
+    switch( aValue )
+    {
+    case types::RuleSeverity::RS_WARNING:   return RPT_SEVERITY_WARNING;
+    case types::RuleSeverity::RS_ERROR:     return RPT_SEVERITY_ERROR;
+    case types::RuleSeverity::RS_EXCLUSION: return RPT_SEVERITY_EXCLUSION;
+    case types::RuleSeverity::RS_IGNORE:    return RPT_SEVERITY_IGNORE;
+    case types::RuleSeverity::RS_INFO:      return RPT_SEVERITY_INFO;
+    case types::RuleSeverity::RS_ACTION:    return RPT_SEVERITY_ACTION;
+    case types::RuleSeverity::RS_DEBUG:     return RPT_SEVERITY_DEBUG;
+    case types::RuleSeverity::RS_UNKNOWN:
+    default:
+        return RPT_SEVERITY_UNDEFINED;
     }
 }

@@ -33,10 +33,13 @@
 
 #include <wx/string.h>
 
+#include <boost/test/unit_test.hpp>
+
 #include <reporter.h>
 #include <core/typeinfo.h>
 #include <tool/tool_manager.h>
 #include <pcb_io/pcb_io.h>
+#include <pcb_track_types.h>
 
 class BOARD;
 class BOARD_ITEM;
@@ -48,6 +51,13 @@ class ZONE;
 class PAD;
 class SHAPE_POLY_SET;
 class SETTINGS_MANAGER;
+
+
+/*
+ * Boost test printers
+ */
+std::ostream& boost_test_print_type( std::ostream& os, const VIATYPE& aViaType );
+
 
 namespace KI_TEST
 {
@@ -96,8 +106,16 @@ public:
 
     CONSOLE_LOG(){};
 
+    const wxString& GetLogContents() const 
+    {
+        return m_logContents;
+    }
+
     void PrintProgress( const wxString& aMessage )
     {
+        if ( m_silenceConsoleOutput )
+            return;
+
         if( m_lastLineIsProgressBar )
             eraseLastLine();
 
@@ -113,18 +131,28 @@ public:
         if( m_lastLineIsProgressBar )
             eraseLastLine();
 
+        if( !m_silenceConsoleOutput )
+        {
         printf( "%s", (const char*) aMessage.c_str() );
         fflush( stdout );
+        }
 
+        m_logContents.append( aMessage );
         m_lastLineIsProgressBar = false;
     }
 
 
     void SetColor( COLOR color )
     {
-        std::map<COLOR, wxString> colorMap = { { RED, "\033[0;31m" },
+        if ( m_silenceConsoleOutput )
+            return;
+
+        std::map<COLOR, wxString> colorMap =
+        {
+            { RED, "\033[0;31m" },
                                                { GREEN, "\033[0;32m" },
-                                               { DEFAULT, "\033[0;37m" } };
+            { DEFAULT, "\033[0;37m" }
+        };
 
         printf( "%s", (const char*) colorMap[color].c_str() );
         fflush( stdout );
@@ -134,12 +162,17 @@ public:
 private:
     void eraseLastLine()
     {
+        if ( m_silenceConsoleOutput )
+            return;
+
         printf( "\r\033[K" );
         fflush( stdout );
     }
 
+    bool m_silenceConsoleOutput = true;
     bool       m_lastLineIsProgressBar = false;
     std::mutex m_lock;
+    wxString m_logContents;
 };
 
 

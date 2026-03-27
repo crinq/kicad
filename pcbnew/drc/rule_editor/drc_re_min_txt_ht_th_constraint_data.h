@@ -39,7 +39,7 @@ public:
     }
 
     explicit DRC_RE_MINIMUM_TEXT_HEIGHT_THICKNESS_CONSTRAINT_DATA( int aId, int aParentId,
-                                                                   wxString aRuleName,
+                                                                   const wxString& aRuleName,
                                                                    double   aMinTextHeight,
                                                                    double   aMinTextThickness ) :
             DRC_RE_BASE_CONSTRAINT_DATA( aId, aParentId, aRuleName ),
@@ -56,12 +56,9 @@ public:
 
     std::vector<DRC_RE_FIELD_POSITION> GetFieldPositions() const override
     {
-        // Positions measured from constraint_minimum_text_height_and_thickness.png (~300x200)
-        // Format: { xStart, xEnd, yTop, tabOrder }
         return {
-            { 230, 310, 55, 1, wxS( "mm" ), LABEL_POSITION::RIGHT }, // min_text_height (right side, vertical dimension)
-            { 140, 220, 165, 2, wxS( "mm" ),
-              LABEL_POSITION::RIGHT }, // min_text_thickness (bottom, horizontal dimension)
+            { 208 + DRC_RE_OVERLAY_XO, 248 + DRC_RE_OVERLAY_XO, 82 + DRC_RE_OVERLAY_YO, 1, wxS( "mm" ), LABEL_POSITION::RIGHT }, // min_text_height
+            { 109 + DRC_RE_OVERLAY_XO, 149 + DRC_RE_OVERLAY_XO, 197 + DRC_RE_OVERLAY_YO, 2, wxS( "mm" ), LABEL_POSITION::RIGHT }, // min_text_thickness
         };
     }
 
@@ -84,6 +81,27 @@ public:
             result.AddError( _( "Minimum Text Thickness must be greater than 0" ) );
 
         return result;
+    }
+
+    std::vector<wxString> GetConstraintClauses( const RULE_GENERATION_CONTEXT& aContext ) const override
+    {
+        auto formatDimension = []( double aValue )
+        {
+            return formatDouble( aValue ) + wxS( "mm" );
+        };
+
+        wxString heightClause =
+                wxString::Format( wxS( "(constraint text_height (min %s))" ), formatDimension( m_minTextHeight ) );
+
+        wxString thicknessClause = wxString::Format( wxS( "(constraint text_thickness (min %s))" ),
+                                                     formatDimension( m_minTextThickness ) );
+
+        return { heightClause, thicknessClause };
+    }
+
+    wxString GenerateRule( const RULE_GENERATION_CONTEXT& aContext ) override
+    {
+        return buildRule( aContext, GetConstraintClauses( aContext ) );
     }
 
     void CopyFrom( const ICopyable& aSource ) override

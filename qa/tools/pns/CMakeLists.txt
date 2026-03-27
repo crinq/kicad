@@ -54,6 +54,7 @@ set( COMMON_SRCS
     ../../../pcbnew/drc/drc_engine.cpp
     ../../../pcbnew/drc/drc_item.cpp
     ../../../pcbnew/board_stackup_manager/stackup_predefined_prms.cpp
+    mock_pcb_tuning_pattern.cpp    
     pns_log_file.cpp
     pns_log_player.cpp
     pns_test_debug_decorator.cpp
@@ -118,7 +119,6 @@ target_link_libraries( pns_debug_tool
     ${PCBNEW_IO_LIBRARIES}
     ${wxWidgets_LIBRARIES}
     ${GDI_PLUS_LIBRARIES}
-    ${PYTHON_LIBRARIES}
     Boost::headers
     ${PCBNEW_EXTRA_LIBS}    # -lrt must follow Boost
 )
@@ -143,7 +143,6 @@ target_link_libraries( qa_pns_regressions
     ${PCBNEW_IO_LIBRARIES}
     ${wxWidgets_LIBRARIES}
     ${GDI_PLUS_LIBRARIES}
-    ${PYTHON_LIBRARIES}
     Boost::headers
     ${PCBNEW_EXTRA_LIBS}    # -lrt must follow Boost
 )

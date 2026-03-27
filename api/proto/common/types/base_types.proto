@@ -140,11 +140,16 @@ message DocumentSpecifier
     // If type == DT_SYMBOL or DT_FOOTPRINT, identifies a certain library entry
     LibraryIdentifier lib_id = 2;
 
-    // If type == DT_SCHEMATIC, identifies a sheet with a given path
+    // If type == DT_SCHEMATIC, identifies a sheet with a given path.  This is relevant when
+    // specifying a child sheet in a given hierarchical schematic.
     SheetPath sheet_path = 3;
 
     // If type == DT_PCB, identifies a PCB with a given filename, e.g. "board.kicad_pcb"
     string board_filename = 4;
+
+    // If type == DT_SCHEMATIC, identifies a single schematic file. This is relevant
+    // instead of `sheet_path` when specifying a top-level schematic to open or work with.
+    string schematic_filename = 6;
   }
 
   ProjectSpecifier project = 5;
@@ -479,4 +484,34 @@ enum ElectricalPinType
 
   // A no-connect pin should not be connected to any net
   EPT_NO_CONNECT = 12;
+}
+
+message RuleCheckerMarkerID
+{
+  string opaque_id = 1;
+}
+
+message RuleCheckerMarker
+{
+  RuleCheckerMarkerID id = 1;
+}
+
+enum RuleSeverity
+{
+  RS_UNKNOWN = 0;
+  RS_WARNING = 1;
+  RS_ERROR = 2;
+  RS_EXCLUSION = 3;
+  RS_IGNORE = 4;
+  RS_INFO = 5;
+  RS_ACTION = 6;
+  RS_DEBUG = 7;
+  RS_UNDEFINED = 8;
+}
+
+message MinOptMax
+{
+  optional int32 min = 1;
+  optional int32 opt = 2;
+  optional int32 max = 3;
 }

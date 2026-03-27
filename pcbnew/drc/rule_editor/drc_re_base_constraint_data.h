@@ -40,7 +40,7 @@ class DRC_RE_BASE_CONSTRAINT_DATA : public RULE_EDITOR_DATA_BASE
 public:
     DRC_RE_BASE_CONSTRAINT_DATA() = default;
 
-    explicit DRC_RE_BASE_CONSTRAINT_DATA( int aId, int aParentId, wxString aRuleName ) :
+    explicit DRC_RE_BASE_CONSTRAINT_DATA( int aId, int aParentId, const wxString& aRuleName ) :
             RULE_EDITOR_DATA_BASE( aId, aParentId, aRuleName )
     {
     }
@@ -89,15 +89,15 @@ public:
 
     wxString GetLayerSource() { return m_layerSource; }
 
-    void SetLayerSource( wxString aSource ) { m_layerSource = aSource; }
+    void SetLayerSource( const wxString& aSource ) { m_layerSource = aSource; }
 
     wxString GetRuleCondition() { return m_ruleCondition; }
 
-    void SetRuleCondition( wxString aRuleCondition ) { m_ruleCondition = aRuleCondition; }
+    void SetRuleCondition( const wxString &aRuleCondition ) { m_ruleCondition = aRuleCondition; }
 
     wxString GetConstraintCode() const { return m_constraintCode; }
 
-    void SetConstraintCode( wxString aCode ) { m_constraintCode = aCode; }
+    void SetConstraintCode( const wxString& aCode ) { m_constraintCode = aCode; }
 
     wxString GetGeneratedRule() const { return m_generatedRule; }
 
@@ -213,8 +213,24 @@ protected:
             }
         }
 
+        wxString condExpr = aContext.conditionExpression;
+
         if( !aContext.layerClause.IsEmpty() )
-            rule << wxS( "\t" ) << aContext.layerClause << wxS( "\n" );
+        {
+            if( aContext.layerClause.StartsWith( wxS( "(condition " ) ) )
+            {
+                wxString expr = aContext.layerClause.AfterFirst( '"' ).BeforeLast( '"' );
+
+                if( !condExpr.IsEmpty() )
+                    condExpr = expr + wxS( " && " ) + condExpr;
+                else
+                    condExpr = expr;
+            }
+            else
+            {
+                rule << wxS( "\t" ) << aContext.layerClause << wxS( "\n" );
+            }
+        }
 
         for( const wxString& clause : aConstraintClauses )
         {
@@ -224,8 +240,8 @@ protected:
             rule << wxS( "\t" ) << clause << wxS( "\n" );
         }
 
-        if( !aContext.conditionExpression.IsEmpty() )
-            rule << wxS( "\t(condition \"" ) << quoteString( aContext.conditionExpression ) << wxS( "\")\n" );
+        if( !condExpr.IsEmpty() )
+            rule << wxS( "\t(condition \"" ) << quoteString( condExpr ) << wxS( "\")\n" );
 
         rule << wxS( ")" );
 

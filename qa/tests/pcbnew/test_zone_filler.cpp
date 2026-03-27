@@ -1229,3 +1229,328 @@ BOOST_FIXTURE_TEST_CASE( LargeCircleTeardropGeometry, ZONE_FILL_TEST_FIXTURE )
                          "Found teardrop with excessive concave vertices on large circle, "
                          "indicating anchor points may not be on circle edge" );
 }
+
+
+/**
+ * Test for issue 23123: Coincident pads from different footprints with different nets
+ * must each get proper zone treatment.
+ *
+ * When two pads occupy the same position with the same geometry but different nets, the
+ * zone filler's deduplication must not skip the second pad. A pad whose net differs from
+ * the zone needs clearance; a pad matching the zone net gets thermal relief. If the
+ * deduplication key omits the net code, the second pad is silently dropped and no
+ * clearance is created.
+ */
+BOOST_FIXTURE_TEST_CASE( RegressionCoincidentPadClearance, ZONE_FILL_TEST_FIXTURE )
+{
+    KI_TEST::LoadBoard( m_settingsManager, "issue23123_minimal", m_board );
+
+    KI_TEST::FillZones( m_board.get() );
+
+    // After filling, every pad whose net differs from the zone must have clearance.
+    // Check each zone/pad combination on each shared layer.
+    int violations = 0;
+
+    for( ZONE* zone : m_board->Zones() )
+    {
+        if( zone->GetIsRuleArea() )
+            continue;
+
+        for( PCB_LAYER_ID layer : zone->GetLayerSet().Seq() )
+        {
+            if( !zone->HasFilledPolysForLayer( layer ) )
+                continue;
+
+            const std::shared_ptr<SHAPE_POLY_SET>& fill = zone->GetFilledPolysList( layer );
+
+            for( PAD* pad : m_board->GetPads() )
+            {
+                if( !pad->IsOnLayer( layer ) )
+                    continue;
+
+                if( pad->GetNetCode() == zone->GetNetCode() )
+                    continue;
+
+                std::shared_ptr<SHAPE> padShape = pad->GetEffectiveShape( layer );
+                int clearance = padShape->GetClearance( fill.get() );
+
+                if( clearance < 1 )
+                {
+                    BOOST_TEST_MESSAGE( wxString::Format(
+                            "Pad %s (net %s) at (%d, %d) has zero clearance to zone %s "
+                            "on layer %s",
+                            pad->GetNumber(), pad->GetNetname(),
+                            pad->GetPosition().x, pad->GetPosition().y,
+                            zone->GetNetname(), m_board->GetLayerName( layer ) ) );
+                    violations++;
+                }
+            }
+        }
+    }
+
+    BOOST_CHECK_MESSAGE( violations == 0,
+                         wxString::Format( "Found %d pads with missing zone clearance. "
+                                           "Coincident pads with different nets must not be "
+                                           "deduplicated in zone fill knockout.",
+                                           violations ) );
+}
+
+
+/**
+ * Verify zone fills clear PTH pads on different nets.
+ *
+ * After fill, DRC must report zero zone-to-pad clearance violations.  Clipper2
+ * rounds corridor-cut vertices to integer coordinates; they can land within 1nm
+ * of a segment endpoint but are not true pinch points.  Exact collinearity
+ * detection keeps them from triggering splits that extend triangles into knockout
+ * areas.
+ */
+BOOST_FIXTURE_TEST_CASE( ZoneViaNetClearance, ZONE_FILL_TEST_FIXTURE )
+{
+    KI_TEST::LoadBoard( m_settingsManager, "connect/connect", m_board );
+
+    BOARD_DESIGN_SETTINGS& bds = m_board->GetDesignSettings();
+
+    KI_TEST::FillZones( m_board.get() );
+
+    std::vector<DRC_ITEM> violations;
+
+    bds.m_DRCEngine->InitEngine( wxFileName() );
+
+    bds.m_DRCEngine->SetViolationHandler(
+            [&]( const std::shared_ptr<DRC_ITEM>& aItem, const VECTOR2I& aPos, int aLayer,
+                 const std::function<void( PCB_MARKER* )>& aPathGenerator )
+            {
+                if( aItem->GetErrorCode() == DRCE_CLEARANCE )
+                {
+                    BOARD_ITEM* item_a = m_board->ResolveItem( aItem->GetMainItemID() );
+                    BOARD_ITEM* item_b = m_board->ResolveItem( aItem->GetAuxItemID() );
+
+                    ZONE* zone_a = dynamic_cast<ZONE*>( item_a );
+                    ZONE* zone_b = dynamic_cast<ZONE*>( item_b );
+
+                    if( zone_a || zone_b )
+                        violations.push_back( *aItem );
+                }
+            } );
+
+    bds.m_DRCEngine->RunTests( EDA_UNITS::MM, true, false );
+
+    BOOST_CHECK_EQUAL( violations.size(), 0 );
+}
+
+
+/**
+ * Verify that custom DRC rules with identical conditions but different layer scopes
+ * are both applied correctly during zone fill.
+ *
+ * Two rules: outer layer 4.6mm clearance, inner layer 2.3mm clearance, both with
+ * the same condition "A.hasNetclass('HV') && B.hasNetclass('LV')". After fill,
+ * the zone-to-zone clearance should match the rule for that layer.
+ *
+ * Regression test for https://gitlab.com/kicad/code/kicad/-/issues/23339
+ */
+BOOST_FIXTURE_TEST_CASE( ZoneLayerSpecificRules, ZONE_FILL_TEST_FIXTURE )
+{
+    KI_TEST::LoadBoard( m_settingsManager, "issue23339_zone_layer_rules", m_board );
+
+    BOARD_DESIGN_SETTINGS& bds = m_board->GetDesignSettings();
+
+    // First verify that EvalRules returns the correct clearance per layer
+    ZONE* hvZone = nullptr;
+    ZONE* lvZone = nullptr;
+
+    for( ZONE* zone : m_board->Zones() )
+    {
+        if( zone->GetNetname() == "HV_NET" )
+            hvZone = zone;
+        else if( zone->GetNetname() == "LV_NET" )
+            lvZone = zone;
+    }
+
+    BOOST_REQUIRE( hvZone );
+    BOOST_REQUIRE( lvZone );
+
+    // Outer layer rule should give 4.6mm clearance on F.Cu
+    DRC_CONSTRAINT outerConstraint = bds.m_DRCEngine->EvalRules( CLEARANCE_CONSTRAINT,
+                                                                   hvZone, lvZone, F_Cu );
+
+    BOOST_TEST_MESSAGE( "F.Cu clearance: " << outerConstraint.GetValue().Min()
+                        << " (expected " << pcbIUScale.mmToIU( 4.6 ) << ")" );
+    BOOST_CHECK_EQUAL( outerConstraint.GetValue().Min(), pcbIUScale.mmToIU( 4.6 ) );
+
+    // Inner layer rule should give 2.3mm clearance on In1.Cu
+    DRC_CONSTRAINT innerConstraint = bds.m_DRCEngine->EvalRules( CLEARANCE_CONSTRAINT,
+                                                                   hvZone, lvZone, In1_Cu );
+
+    BOOST_TEST_MESSAGE( "In1.Cu clearance: " << innerConstraint.GetValue().Min()
+                        << " (expected " << pcbIUScale.mmToIU( 2.3 ) << ")" );
+    BOOST_CHECK_EQUAL( innerConstraint.GetValue().Min(), pcbIUScale.mmToIU( 2.3 ) );
+
+    // Now fill zones and check that fills actually respect the clearances
+    KI_TEST::FillZones( m_board.get() );
+
+    // Run DRC and verify no clearance violations between zones
+    std::vector<DRC_ITEM> violations;
+
+    bds.m_DRCEngine->InitEngine( wxFileName() );
+
+    bds.m_DRCEngine->SetViolationHandler(
+            [&]( const std::shared_ptr<DRC_ITEM>& aItem, const VECTOR2I& aPos, int aLayer,
+                 const std::function<void( PCB_MARKER* )>& aPathGenerator )
+            {
+                if( aItem->GetErrorCode() == DRCE_CLEARANCE )
+                {
+                    BOARD_ITEM* item_a = m_board->ResolveItem( aItem->GetMainItemID() );
+                    BOARD_ITEM* item_b = m_board->ResolveItem( aItem->GetAuxItemID() );
+
+                    ZONE* zone_a = dynamic_cast<ZONE*>( item_a );
+                    ZONE* zone_b = dynamic_cast<ZONE*>( item_b );
+
+                    if( zone_a && zone_b )
+                    {
+                        BOOST_TEST_MESSAGE( "Zone-to-zone clearance violation on layer "
+                                            << aLayer << ": " << aItem->GetErrorMessage( true ) );
+                        violations.push_back( *aItem );
+                    }
+                }
+            } );
+
+    bds.m_DRCEngine->RunTests( EDA_UNITS::MM, true, false );
+
+    BOOST_CHECK_EQUAL( violations.size(), 0 );
+}
+
+
+BOOST_FIXTURE_TEST_CASE( RegressionZoneFillMinWidthAfterKnockout, ZONE_FILL_TEST_FIXTURE )
+{
+    KI_TEST::LoadBoard( m_settingsManager, "issue23332_min_width/issue23332_min_width", m_board );
+
+    KI_TEST::FillZones( m_board.get() );
+
+    int epsilon = pcbIUScale.mmToIU( 0.001 );
+
+    for( ZONE* zone : m_board->Zones() )
+    {
+        int half_min_width = zone->GetMinThickness() / 2;
+
+        if( half_min_width - epsilon <= epsilon )
+            continue;
+
+        for( PCB_LAYER_ID layer : zone->GetLayerSet().Seq() )
+        {
+            if( !zone->HasFilledPolysForLayer( layer ) )
+                continue;
+
+            std::shared_ptr<SHAPE_POLY_SET> fill = zone->GetFilledPolysList( layer );
+
+            if( !fill || fill->OutlineCount() == 0 )
+                continue;
+
+            // Check each filled island individually so that a tiny thin sliver
+            // isn't masked by a large zone's total area
+            for( int ii = 0; ii < fill->OutlineCount(); ii++ )
+            {
+                SHAPE_POLY_SET island;
+                island.AddOutline( fill->Outline( ii ) );
+
+                for( int jj = 0; jj < fill->HoleCount( ii ); jj++ )
+                    island.AddHole( fill->Hole( ii, jj ) );
+
+                double originalArea = island.Area();
+
+                if( originalArea <= 0 )
+                    continue;
+
+                SHAPE_POLY_SET test = island.CloneDropTriangulation();
+
+                test.Deflate( half_min_width - epsilon, CORNER_STRATEGY::CHAMFER_ALL_CORNERS,
+                              ARC_HIGH_DEF );
+
+                test.Inflate( half_min_width - epsilon, CORNER_STRATEGY::ROUND_ALL_CORNERS,
+                              ARC_HIGH_DEF, true );
+
+                double prunedArea = test.Area();
+                double areaLoss = ( originalArea - prunedArea ) / originalArea;
+
+                BOOST_TEST_MESSAGE( wxString::Format(
+                        "Zone %s layer %d island %d: area=%.0f, loss=%.4f%%",
+                        zone->GetNetname(), static_cast<int>( layer ), ii,
+                        originalArea, areaLoss * 100.0 ) );
+
+                BOOST_CHECK_MESSAGE( areaLoss < 0.01,
+                                     wxString::Format(
+                                             "Zone %s layer %d island %d lost %.2f%% area from "
+                                             "min-width pruning (min_width=%.3fmm)",
+                                             zone->GetNetname(), static_cast<int>( layer ), ii,
+                                             areaLoss * 100.0,
+                                             zone->GetMinThickness()
+                                                     / static_cast<double>( pcbIUScale.IU_PER_MM ) ) );
+            }
+        }
+    }
+}
+
+
+BOOST_FIXTURE_TEST_CASE( RegressionSameNetOverlappingZones, ZONE_FILL_TEST_FIXTURE )
+{
+    KI_TEST::LoadBoard( m_settingsManager, "issue23418/testing", m_board );
+
+    KI_TEST::FillZones( m_board.get() );
+
+    int epsilon = pcbIUScale.mmToIU( 0.001 );
+
+    for( ZONE* zone : m_board->Zones() )
+    {
+        int half_min_width = zone->GetMinThickness() / 2;
+
+        if( half_min_width - epsilon <= epsilon )
+            continue;
+
+        for( PCB_LAYER_ID layer : zone->GetLayerSet().Seq() )
+        {
+            if( !zone->HasFilledPolysForLayer( layer ) )
+                continue;
+
+            std::shared_ptr<SHAPE_POLY_SET> fill = zone->GetFilledPolysList( layer );
+
+            if( !fill || fill->OutlineCount() == 0 )
+                continue;
+
+            for( int ii = 0; ii < fill->OutlineCount(); ii++ )
+            {
+                SHAPE_POLY_SET island;
+                island.AddOutline( fill->Outline( ii ) );
+
+                for( int jj = 0; jj < fill->HoleCount( ii ); jj++ )
+                    island.AddHole( fill->Hole( ii, jj ) );
+
+                double originalArea = island.Area();
+
+                if( originalArea <= 0 )
+                    continue;
+
+                SHAPE_POLY_SET test = island.CloneDropTriangulation();
+
+                test.Deflate( half_min_width - epsilon, CORNER_STRATEGY::CHAMFER_ALL_CORNERS,
+                              ARC_HIGH_DEF );
+
+                test.Inflate( half_min_width - epsilon, CORNER_STRATEGY::ROUND_ALL_CORNERS,
+                              ARC_HIGH_DEF, true );
+
+                double prunedArea = test.Area();
+                double areaLoss = ( originalArea - prunedArea ) / originalArea;
+
+                BOOST_CHECK_MESSAGE( areaLoss < 0.01,
+                                     wxString::Format(
+                                             "Zone %s (priority %d) layer %d island %d lost "
+                                             "%.2f%% area from min-width pruning, suggesting "
+                                             "degenerate geometry from overlapping same-net zones",
+                                             zone->GetNetname(),
+                                             zone->GetAssignedPriority(),
+                                             static_cast<int>( layer ), ii,
+                                             areaLoss * 100.0 ) );
+            }
+        }
+    }
+}

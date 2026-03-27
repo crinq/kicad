@@ -247,7 +247,7 @@ BOARD* PCB_IO_EASYEDA::LoadBoard( const wxString& aFileName, BOARD* aAppendToMe,
         parser.ParseBoard( m_board, origin, m_loadedFootprints, doc.shape );
 
         // Center the board
-        BOX2I     outlineBbox = m_board->ComputeBoundingBox( true );
+        BOX2I     outlineBbox = m_board->ComputeBoundingBox( true, true );
         PAGE_INFO pageInfo = m_board->GetPageSettings();
 
         VECTOR2D pageCenter( pcbIUScale.MilsToIU( pageInfo.GetWidthMils() / 2 ),
@@ -327,7 +327,7 @@ void PCB_IO_EASYEDA::FootprintEnumerate( wxArrayString&  aFootprintNames,
 
                     std::map<wxString, wxString> paramMap;
 
-                    for( int i = 1; i < paramParts.size(); i += 2 )
+                    for( int i = 1; i < (int) paramParts.size(); i += 2 )
                     {
                         wxString key = paramParts[i - 1];
                         wxString value = paramParts[i];
@@ -434,7 +434,7 @@ FOOTPRINT* PCB_IO_EASYEDA::FootprintLoad( const wxString& aLibraryPath,
 
                     std::map<wxString, wxString> paramMap;
 
-                    for( int i = 1; i < paramParts.size(); i += 2 )
+                    for( int i = 1; i < (int) paramParts.size(); i += 2 )
                     {
                         wxString key = paramParts[i - 1];
                         wxString value = paramParts[i];

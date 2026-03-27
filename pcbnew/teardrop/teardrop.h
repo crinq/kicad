@@ -26,13 +26,12 @@
 #define TEARDROP_H
 
 #include <tool/tool_manager.h>
-#include <board.h>
-#include <footprint.h>
-#include <pad.h>
-#include <pcb_track.h>
-#include <zone.h>
 #include <drc/drc_rtree.h>
 #include "teardrop_parameters.h"
+
+class BOARD;
+class PCB_TRACK;
+class ZONE;
 
 
 // A class to store tracks grouped by layer and netcode

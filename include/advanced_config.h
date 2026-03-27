@@ -553,15 +553,6 @@ public:
     bool m_EnableGenerators;
 
     /**
-     * Enable the graphical DRC rule editor.
-     *
-     * Setting name: "EnableDrcRuleEditor"
-     * Valid values: 0 or 1
-     * Default value: 0
-     */
-    bool m_EnableDrcRuleEditor;
-
-    /**
      * Enable option to load lib files with text editor.
      *
      * Setting name: "EnableLibWithText"
@@ -876,6 +867,18 @@ public:
     bool m_ImportSkipComponentBodies;
 
     /**
+     * Skip the layer mapping step when importing.
+     *
+     * This can be convenient to speed up imports when testing other aspects of the import,
+     * as you don't need to interact with the layer mapping dialog.
+     *
+     * Setting name: "ImportSkipLayerMapping"
+     * Valid values: 0 or 1
+     * Default value: 0
+     */
+    bool m_ImportSkipLayerMapping;
+
+    /**
      * Screen DPI setting for display calculations.
      *
      * This setting controls the assumed screen DPI for various display calculations.
@@ -983,6 +986,18 @@ public:
      * Default value: true
      */
     bool m_ZoneFillIterativeRefill;
+
+    /**
+     * Router test case directory.
+     * 
+     * Directory where the router stores the test cases (the '0' key dump)
+     * Used to make creating test cases easier (a simple dialog instead of manually copying files)
+     * 
+     * Setting name: "RouterTestCaseDirectory"
+     * Valid values: directory name
+     * Default value: ""
+     */
+    wxString m_RouterTestCaseDirectory;
 
     wxString m_traceMasks; ///< Trace masks for wxLogTrace, loaded from the config file.
     ///@}

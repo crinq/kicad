@@ -347,6 +347,15 @@ int EESCHEMA_JOBS_HANDLER::JobExportPlot( JOB* aJob )
     case JOB_PAGE_SIZE::PAGE_SIZE_AUTO: pageSizeSelect = PageFormatReq::PAGE_SIZE_AUTO; break;
     }
 
+    if( !aPlotJob->GetOutputPathIsDirectory() && aPlotJob->GetConfiguredOutputPath().IsEmpty() )
+    {
+        wxFileName fn = sch->GetFileName();
+        fn.SetName( fn.GetName() );
+        fn.SetExt( GetDefaultPlotExtension( format ) );
+
+        aPlotJob->SetConfiguredOutputPath( fn.GetFullName() );
+    }
+
     wxString outPath = aPlotJob->GetFullOutputPath( &sch->Project() );
 
     if( !PATHS::EnsurePathExists( outPath, !aPlotJob->GetOutputPathIsDirectory() ) )
@@ -390,6 +399,9 @@ int EESCHEMA_JOBS_HANDLER::JobExportPlot( JOB* aJob )
 
     if( m_reporter->HasMessageOfSeverity( RPT_SEVERITY_ERROR ) )
         return CLI::EXIT_CODES::ERR_UNKNOWN;
+
+    for( const wxString& outputPath : schPlotter->GetOutputFilePaths() )
+        aJob->AddOutput( outputPath );
 
     return CLI::EXIT_CODES::OK;
 }
@@ -518,6 +530,8 @@ int EESCHEMA_JOBS_HANDLER::JobExportNetlist( JOB* aJob )
 
     if( !res )
         return CLI::EXIT_CODES::ERR_UNKNOWN;
+
+    aJob->AddOutput( outPath );
 
     return CLI::EXIT_CODES::OK;
 }
@@ -671,10 +685,38 @@ int EESCHEMA_JOBS_HANDLER::JobExportBom( JOB* aJob )
     }
     else
     {
+        // Normalize field names so that bare generated-field tokens (e.g. "QUANTITY") are
+        // accepted alongside the canonical "${QUANTITY}" form. Shell expansion of ${VAR}
+        // inside double quotes silently produces an empty string, so this also guards against
+        // that common CLI pitfall.
+        auto normalizeFieldName = [&dataModel]( const wxString& aName ) -> wxString
+        {
+            if( aName.IsEmpty() )
+                return wxEmptyString;
+
+            if( IsGeneratedField( aName ) )
+                return aName;
+
+            wxString wrapped = wxS( "${" ) + aName + wxS( "}" );
+
+            if( IsGeneratedField( wrapped ) && dataModel.GetFieldNameCol( wrapped ) != -1 )
+                return wrapped;
+
+            return aName;
+        };
+
         size_t i = 0;
 
-        for( const wxString& fieldName : aBomJob->m_fieldsOrdered )
+        for( const wxString& rawFieldName : aBomJob->m_fieldsOrdered )
         {
+            wxString fieldName = normalizeFieldName( rawFieldName );
+
+            if( fieldName.IsEmpty() )
+            {
+                i++;
+                continue;
+            }
+
             // Handle wildcard. We allow the wildcard anywhere in the list, but it needs to respect
             // fields that come before and after the wildcard.
             if( fieldName == wxS( "*" ) )
@@ -703,7 +745,7 @@ int EESCHEMA_JOBS_HANDLER::JobExportBom( JOB* aJob )
 
                     for( const wxString& fieldInList : aBomJob->m_fieldsOrdered )
                     {
-                        if( fieldInList == field.name )
+                        if( normalizeFieldName( fieldInList ) == field.name )
                         {
                             fieldLaterInList = true;
                             break;
@@ -721,7 +763,9 @@ int EESCHEMA_JOBS_HANDLER::JobExportBom( JOB* aJob )
 
             field.name = fieldName;
             field.show = !fieldName.StartsWith( wxT( "__" ), &field.name );
-            field.groupBy = alg::contains( aBomJob->m_fieldsGroupBy, field.name );
+
+            field.groupBy = alg::contains( aBomJob->m_fieldsGroupBy, field.name )
+                            || alg::contains( aBomJob->m_fieldsGroupBy, rawFieldName );
 
             if( ( aBomJob->m_fieldsLabels.size() > i ) && !aBomJob->m_fieldsLabels[i].IsEmpty() )
                 field.label = aBomJob->m_fieldsLabels[i];
@@ -735,7 +779,7 @@ int EESCHEMA_JOBS_HANDLER::JobExportBom( JOB* aJob )
         }
 
         preset.sortAsc = aBomJob->m_sortAsc;
-        preset.sortField = aBomJob->m_sortField;
+        preset.sortField = normalizeFieldName( aBomJob->m_sortField );
         preset.filterString = aBomJob->m_filterString;
         preset.groupSymbols = aBomJob->m_groupSymbols;
         preset.excludeDNP = aBomJob->m_excludeDNP;
@@ -854,6 +898,8 @@ int EESCHEMA_JOBS_HANDLER::JobExportBom( JOB* aJob )
         if( !res )
             return CLI::EXIT_CODES::ERR_UNKNOWN;
 
+        aJob->AddOutput( outPath );
+
         m_reporter->Report( wxString::Format( _( "Wrote bill of materials to '%s'." ), outPath ),
                             RPT_SEVERITY_ACTION );
     }
@@ -925,6 +971,8 @@ int EESCHEMA_JOBS_HANDLER::JobExportPythonBom( JOB* aJob )
 
     if( !res )
         return CLI::EXIT_CODES::ERR_UNKNOWN;
+
+    aJob->AddOutput( outPath );
 
     m_reporter->Report( wxString::Format( _( "Wrote bill of materials to '%s'." ), outPath ),
                         RPT_SEVERITY_ACTION );
@@ -1374,6 +1422,11 @@ DS_PROXY_VIEW_ITEM* EESCHEMA_JOBS_HANDLER::getDrawingSheetProxyView( SCHEMATIC* 
     drawingSheet->SetColorLayer( LAYER_SCHEMATIC_DRAWINGSHEET );
     drawingSheet->SetPageBorderColorLayer( LAYER_SCHEMATIC_PAGE_LIMITS );
     drawingSheet->SetIsFirstPage( aSch->RootScreen()->GetVirtualPageNumber() == 1 );
+
+    wxString currentVariant = aSch->GetCurrentVariant();
+    wxString variantDesc = aSch->GetVariantDescription( currentVariant );
+    drawingSheet->SetVariantName( TO_UTF8( currentVariant ) );
+    drawingSheet->SetVariantDesc( TO_UTF8( variantDesc ) );
 
     drawingSheet->SetSheetName( "" );
     drawingSheet->SetSheetPath( "" );

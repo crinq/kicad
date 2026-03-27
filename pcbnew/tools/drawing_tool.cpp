@@ -71,6 +71,7 @@
 #include <footprint.h>
 #include <macros.h>
 #include <gal/painter.h>
+#include <pad.h>
 #include <pcb_edit_frame.h>
 #include <pcb_group.h>
 #include <pcb_point.h>
@@ -79,6 +80,7 @@
 #include <pcb_textbox.h>
 #include <pcb_table.h>
 #include <pcb_tablecell.h>
+#include <pcb_track.h>
 #include <pcb_dimension.h>
 #include <pcbnew_id.h>
 #include <scoped_set_reset.h>
@@ -3664,6 +3666,11 @@ int DRAWING_TOOL::DrawVia( const TOOL_EVENT& aEvent )
         int                         m_worstClearance;
         bool                        m_allowDRCViolations;
 
+        int sub_e( int aClearance )
+        {
+            return std::max( 0, aClearance - m_drcEpsilon );
+        };
+
         VIA_PLACER( PCB_BASE_EDIT_FRAME* aFrame ) :
                 m_frame( aFrame ),
                 m_gridHelper( aFrame->GetToolManager(), aFrame->GetMagneticItemsSettings() ),
@@ -3831,7 +3838,7 @@ int DRAWING_TOOL::DrawVia( const TOOL_EVENT& aEvent )
                     std::shared_ptr<SHAPE> viaShape = aVia->GetEffectiveShape( layer );
                     std::shared_ptr<SHAPE> otherShape = aOther->GetEffectiveShape( layer );
 
-                    if( viaShape->Collide( otherShape.get(), clearance - m_drcEpsilon ) )
+                    if( viaShape->Collide( otherShape.get(), sub_e( clearance ) ) )
                         return true;
                 }
             }
@@ -3845,7 +3852,7 @@ int DRAWING_TOOL::DrawVia( const TOOL_EVENT& aEvent )
                 {
                     std::shared_ptr<SHAPE> viaShape = aVia->GetEffectiveShape( UNDEFINED_LAYER );
 
-                    if( viaShape->Collide( aOther->GetEffectiveHoleShape().get(), clearance - m_drcEpsilon ) )
+                    if( viaShape->Collide( aOther->GetEffectiveHoleShape().get(), sub_e( clearance ) ) )
                         return true;
                 }
             }
@@ -4310,7 +4317,7 @@ int DRAWING_TOOL::DrawVia( const TOOL_EVENT& aEvent )
                 track->SetEnd( viaPos );
 
                 PCB_TRACK* newTrack = dynamic_cast<PCB_TRACK*>( track->Clone() );
-                const_cast<KIID&>( newTrack->m_Uuid ) = KIID();
+                newTrack->ResetUuidDirect();
 
                 newTrack->SetStart( viaPos );
                 newTrack->SetEnd( trackEnd );

@@ -32,25 +32,21 @@
 #include <json_schema_validator.h>
 
 
-class LOGGING_ERROR_HANDLER : public nlohmann::json_schema::error_handler
+LOGGING_ERROR_HANDLER::LOGGING_ERROR_HANDLER() :
+        m_hasError( false )
 {
-public:
-    LOGGING_ERROR_HANDLER() : m_hasError( false ) {}
+}
 
-    bool HasError() const { return m_hasError; }
 
-    void error( const nlohmann::json::json_pointer& ptr, const nlohmann::json& instance,
-                const std::string& message ) override
-    {
-        m_hasError = true;
-        wxLogTrace( traceApi,
-                    wxString::Format( wxS( "JSON error: at %s, value:\n%s\n%s" ),
-                                      ptr.to_string(), instance.dump(), message ) );
-    }
-
-private:
-    bool m_hasError;
-};
+void LOGGING_ERROR_HANDLER::error( const nlohmann::json::json_pointer& ptr,
+                                   const nlohmann::json& instance,
+                                   const std::string& message )
+{
+    m_hasError = true;
+    wxLogTrace( traceApi,
+                wxString::Format( wxS( "JSON error: at %s, value:\n%s\n%s" ),
+                                  ptr.to_string(), instance.dump(), message ) );
+}
 
 
 bool PLUGIN_RUNTIME::FromJson( const nlohmann::json& aJson )
@@ -173,6 +169,7 @@ API_PLUGIN_CONFIG::API_PLUGIN_CONFIG( API_PLUGIN& aParent, const wxFileName& aCo
     catch( ... )
     {
         wxLogTrace( traceApi, "Plugin: exception while parsing actions" );
+        return;
     }
 
     valid = true;

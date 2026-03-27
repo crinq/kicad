@@ -25,6 +25,8 @@
 
 #include <wx/log.h>
 
+#include "footprint.h"
+#include "pad.h"
 #include "pcb_shape.h"
 #include "odb_defines.h"
 #include "pcb_track.h"
@@ -488,8 +490,8 @@ void FEATURES_MANAGER::InitFeatureList( PCB_LAYER_ID aLayer, std::vector<BOARD_I
 
         if( PCB_TEXT* tmp_text = dynamic_cast<PCB_TEXT*>( item ) )
             text_item = static_cast<EDA_TEXT*>( tmp_text );
-        else if( PCB_TEXTBOX* tmp_text = dynamic_cast<PCB_TEXTBOX*>( item ) )
-            text_item = static_cast<EDA_TEXT*>( tmp_text );
+        else if( PCB_TEXTBOX* tmp_textbox = dynamic_cast<PCB_TEXTBOX*>( item ) )
+            text_item = static_cast<EDA_TEXT*>( tmp_textbox );
 
         if( !text_item || !text_item->IsVisible() || text_item->GetShownText( false ).empty() )
             return;

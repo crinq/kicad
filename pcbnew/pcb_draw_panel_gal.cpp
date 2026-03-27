@@ -34,6 +34,7 @@
 
 #include <board.h>
 #include <footprint.h>
+#include <pad.h>
 #include <pcb_track.h>
 #include <macros.h>
 #include <pcb_generator.h>
@@ -453,8 +454,27 @@ void PCB_DRAW_PANEL_GAL::DisplayBoard( BOARD* aBoard, PROGRESS_REPORTER* aReport
     if( m_drawingSheet )
         m_drawingSheet->SetFileName( TO_UTF8( aBoard->GetFileName() ) );
 
+    // Collect all board items, expanding footprints into their children (pads, fields,
+    // graphics, zones) which are individually registered in the VIEW for rendering and
+    // selection. Then bulk-load all items in a single pass for efficient R-tree construction.
+    std::vector<KIGFX::VIEW_ITEM*> viewItems;
+
     for( BOARD_ITEM* item : aBoard->GetItemSet() )
-        m_view->Add( item );
+    {
+        viewItems.push_back( item );
+
+        if( item->Type() == PCB_FOOTPRINT_T )
+        {
+            static_cast<FOOTPRINT*>( item )->RunOnChildren(
+                    [&viewItems]( BOARD_ITEM* child )
+                    {
+                        viewItems.push_back( child );
+                    },
+                    RECURSE_MODE::NO_RECURSE );
+        }
+    }
+
+    m_view->AddBatch( viewItems );
 
     aBoard->UpdateBoardOutline();
     m_view->Add( aBoard->BoardOutline() );
@@ -793,10 +813,12 @@ void PCB_DRAW_PANEL_GAL::setDefaultLayerOrder()
         // MW: Gross hack to make SetTopLayer bring the correct bitmap layer to
         // the top of the other bitmaps, but still below all the other layers
         if( layer >= LAYER_BITMAP_START && layer < LAYER_BITMAP_END )
-            m_view->SetLayerOrder( layer, i - KIGFX::VIEW::TOP_LAYER_MODIFIER );
+            m_view->SetLayerOrder( layer, i - KIGFX::VIEW::TOP_LAYER_MODIFIER, false );
         else
-            m_view->SetLayerOrder( layer, i );
+            m_view->SetLayerOrder( layer, i, false );
     }
+
+    m_view->SortOrderedLayers();
 }
 
 

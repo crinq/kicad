@@ -28,8 +28,7 @@ add_subdirectory( netlist_reader )
 # Get the shared PADS format support library
 add_subdirectory( io/pads )
 
-# Only for win32 cross compilation using MXE
-add_compile_definitions( $<$<AND:$<BOOL:${WIN32}>,$<BOOL:${MSYS}>>:GLEW_STATIC> )
+
 
 
 # The build version string defaults to the value in the KiCadVersion.cmake file.
@@ -60,6 +59,22 @@ add_custom_target(
         -DBANNED_DIRS="${PROJECT_SOURCE_DIR}/common/io;${PROJECT_SOURCE_DIR}/pcbnew/pcb_io;${PROJECT_SOURCE_DIR}/eeschema/sch_io"
         -P ${KICAD_CMAKE_MODULE_PATH}/CheckBannedFunctions.cmake
 )
+
+if( NOT (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_BINARY_DIR} ) )
+    file( GLOB REMOTE_PROVIDER_SCHEMA_FILES
+        ${CMAKE_SOURCE_DIR}/resources/schemas/kicad-remote-*.json
+    )
+
+    add_custom_target( remote_provider_schema_build_copy
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/schemas
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${REMOTE_PROVIDER_SCHEMA_FILES}
+            ${CMAKE_BINARY_DIR}/schemas
+        DEPENDS ${REMOTE_PROVIDER_SCHEMA_FILES}
+        COMMENT "Copying remote provider schema files into build directory"
+    )
+endif()
+
 # A shared library used by multiple *.kiface files and one or two program
 # launchers.  Object files can migrate into here over time, but only if they are
 # surely needed and certainly used from more than one place without recompilation.
@@ -73,7 +88,10 @@ set( KICOMMON_SRCS
 
     # Gal
     gal/color4d.cpp
-    gal/opengl/gl_context_mgr.cpp
+
+    # KiCad GL
+    kicad_gl/gl_utils.cpp
+    kicad_gl/gl_context_mgr.cpp
 
     # Git
     git/git_add_to_index_handler.cpp
@@ -180,6 +198,7 @@ set( KICOMMON_SRCS
 
     dialogs/dialog_rc_job.cpp
     dialogs/dialog_rc_job_base.cpp
+    dialogs/dialog_restore_local_history.cpp
     dialogs/dialog_HTML_reporter_base.cpp
     dialogs/panel_startwizard_libraries_base.cpp
     dialogs/panel_startwizard_privacy_base.cpp
@@ -256,8 +275,17 @@ set( KICOMMON_SRCS
     netclass.cpp
     notifications_manager.cpp
     page_info.cpp
+    oauth/oauth_loopback_server.cpp
+    oauth/oauth_pkce.cpp
+    oauth/oauth_session.cpp
+    oauth/secure_token_store.cpp
     paths.cpp
     project.cpp
+    remote_provider_client.cpp
+    remote_provider_metadata.cpp
+    remote_provider_models.cpp
+    remote_provider_settings.cpp
+    remote_provider_utils.cpp
     reporter.cpp
     richio.cpp
     scintilla_tricks.cpp
@@ -275,8 +303,6 @@ set( KICOMMON_SRCS
 
     singleton.cpp
     pgm_base.cpp
-
-    ../scripting/python_scripting.cpp
 
     io/kicad/kicad_io_utils.cpp    # needed by richio
     io/io_base.cpp
@@ -304,8 +330,7 @@ if( KICAD_IPC_API )
         api/api_plugin.cpp
         api/api_plugin_manager.cpp
         api/api_server.cpp
-
-        ../scripting/python_manager.cpp
+        api/python_manager.cpp
     )
 endif()
 
@@ -324,6 +349,8 @@ if( KICAD_USE_PCH )
             <set>
             <string>
             <vector>
+            <kiid.h>
+            <pgm_base.h>
             <wx/wx.h>
              )
 endif()
@@ -343,6 +370,7 @@ target_link_libraries( kicommon
     picosha2
     rapidcsv
     sexpr
+    glad
     ${ZSTD_LIBRARY}
     ${wxWidgets_LIBRARIES}
     ${LIBGIT2_LIBRARIES}
@@ -355,9 +383,6 @@ target_link_libraries( kicommon
    	${FREETYPE_LIBRARIES}
    	${HarfBuzz_LIBRARIES}
 	${Fontconfig_LIBRARIES}
-
-    # needed because of python_scripting.cpp
-    ${PYTHON_LIBRARIES}
     )
 
 
@@ -424,6 +449,10 @@ target_include_directories( kicommon
     )
 
 add_dependencies( kicommon pegtl version_header )
+
+if( TARGET remote_provider_schema_build_copy )
+    add_dependencies( kicommon remote_provider_schema_build_copy )
+endif()
 
 if( MSVC )
     target_sources( kicommon PRIVATE ${CMAKE_SOURCE_DIR}/resources/msw/kicommon-dll.rc )
@@ -641,6 +670,7 @@ set( COMMON_IO_SRCS
     io/altium/altium_binary_parser.cpp
     io/altium/altium_ascii_parser.cpp
     io/altium/altium_parser_utils.cpp
+    io/altium/altium_project_variants.cpp
     io/altium/altium_props_utils.cpp
 
     # Cadstar
@@ -717,6 +747,7 @@ set( COMMON_SRCS
     hotkey_store.cpp
     hotkeys_basic.cpp
     inspectable.cpp
+    item_realignment.cpp
     kiface_base.cpp
     kiway_player.cpp
     lib_table_grid_tricks.cpp
@@ -733,7 +764,6 @@ set( COMMON_SRCS
     refdes_utils.cpp
     reference_image.cpp
     render_settings.cpp
-    remote_login_server.cpp
     status_popup.cpp
     stroke_params.cpp
     template_fieldnames.cpp
@@ -822,7 +852,7 @@ add_library( common STATIC
     )
 
 if( KICAD_USE_PCH )
-    target_precompile_headers( kicommon
+    target_precompile_headers( common
         PRIVATE
             <kicommon.h>
             <algorithm>
@@ -832,11 +862,19 @@ if( KICAD_USE_PCH )
             <set>
             <string>
             <vector>
+            <clipper2/clipper.h>
+            <eda_draw_frame.h>
+            <kiid.h>
+            <pgm_base.h>
             <wx/wx.h>
              )
 endif()
 
 add_dependencies( common version_header )
+
+if( TARGET remote_provider_schema_build_copy )
+    add_dependencies( common remote_provider_schema_build_copy )
+endif()
 add_dependencies( common compoundfilereader )  # used by altium_parser.cpp
 
 target_link_libraries( common
@@ -850,9 +888,7 @@ target_link_libraries( common
     nanosvg
     dxflib_qcad
     tinyspline_lib
-    scripting
     nlohmann_json
-    pybind11::embed
     compoundfilereader
     Boost::headers
     # Database support needs these two
@@ -919,6 +955,7 @@ set( PCB_COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_group.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_marker.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/footprint.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/footprint_utils.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/footprint_library_adapter.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/fix_board_shape.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/layer_utils.cpp
@@ -940,6 +977,7 @@ set( PCB_COMMON_SRCS
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_track.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/pcb_generator.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/zone.cpp
+    ${CMAKE_SOURCE_DIR}/pcbnew/zone_utils.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/collectors.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/connectivity/connectivity_algo.cpp
     ${CMAKE_SOURCE_DIR}/pcbnew/connectivity/connectivity_items.cpp

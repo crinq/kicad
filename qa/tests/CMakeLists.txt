@@ -48,22 +48,6 @@ elseif ( MSVC )
     set( EXTRA_PYTEST_ENVIRONMENT "FONTCONFIG_PATH=${CMAKE_SOURCE_DIR}/qa/resources/windows/fonts/" )
 endif()
 
-if( NOT (MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug") )
-# qa_python will never work under MSVC + Debug because we only have the Release mode python.exe
-# but the kicad binaries are linked to the debug mode python
-# Test that runs the QA tests through scripting
-add_test(NAME qa_python
-    COMMAND ${PYTHON_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/pcbnewswig ${PYTEST_ARGS_QAPYTHON}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-set_tests_properties( qa_python
-    PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/pcbnew;${PYTHON_QA_PATH};${EXTRA_PYTEST_ENVIRONMENT}"
-)
-
-setup_qa_env( qa_python )
-endif()
 
 add_test(NAME qa_cli
     COMMAND ${PYTHON_EXECUTABLE} -m pytest ${CMAKE_CURRENT_SOURCE_DIR}/cli ${PYTEST_ARGS_QACLI}
@@ -76,7 +60,3 @@ set_tests_properties( qa_cli
 )
 
 setup_qa_env( qa_cli )
-
-# Target to install python dependencies for QA via pip
-add_custom_target( qa_python_deps
-        COMMAND ${PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_CURRENT_SOURCE_DIR}/requirements.txt )

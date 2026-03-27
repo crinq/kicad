@@ -148,7 +148,6 @@ struct APP_TEST : public wxApp
 
     bool OnInit() override
     {
-
         try
         {
             if( !program.OnPgmInit() )
@@ -176,8 +175,6 @@ struct APP_TEST : public wxApp
         {
             wxLogError( wxT( "Unhandled exception of unknown type" ) );
         }
-
-        program.OnPgmExit();
 
         return false;
     }
@@ -236,9 +233,9 @@ int main( int argc, char** argv )
     wxInitialize( argc, argv );
 
 #ifdef TEST_APP_GUI
-    Pgm().InitPgm( false, true );
+    Pgm().InitPgm( false );
 #else
-    Pgm().InitPgm( true, true );
+    Pgm().InitPgm( true );
 #endif
 
     auto ret = wxEntry( argc, argv );

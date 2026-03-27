@@ -122,7 +122,7 @@ bool PCB_SHAPE::Deserialize( const google::protobuf::Any &aContainer )
     m_proxyItem = false;
     m_endsSwapped = false;
 
-    const_cast<KIID&>( m_Uuid ) = KIID( msg.id().value() );
+    SetUuidDirect( KIID( msg.id().value() ) );
     SetLocked( msg.locked() == types::LS_LOCKED );
     SetLayer( FromProtoEnum<PCB_LAYER_ID, BoardLayer>( msg.layer() ) );
     UnpackNet( msg.net() );
@@ -189,7 +189,9 @@ int PCB_SHAPE::GetSolderMaskExpansion() const
 {
     int margin = 0;
 
-    if( GetBoard() && GetBoard()->GetDesignSettings().m_DRCEngine )
+    if( GetBoard() && GetBoard()->GetDesignSettings().m_DRCEngine
+        && GetBoard()->GetDesignSettings().m_DRCEngine->HasRulesForConstraintType(
+                   SOLDER_MASK_EXPANSION_CONSTRAINT ) )
     {
         DRC_CONSTRAINT              constraint;
         std::shared_ptr<DRC_ENGINE> drcEngine = GetBoard()->GetDesignSettings().m_DRCEngine;
@@ -202,6 +204,10 @@ int PCB_SHAPE::GetSolderMaskExpansion() const
     else if( m_solderMaskMargin.has_value() )
     {
         margin = m_solderMaskMargin.value();
+    }
+    else if( const BOARD* board = GetBoard() )
+    {
+        margin = board->GetDesignSettings().m_SolderMaskExpansion;
     }
 
     // Ensure the resulting mask opening has a non-negative size
@@ -320,69 +326,66 @@ void PCB_SHAPE::UpdateHatching() const
     m_hatchingDirty = true;
 
     EDA_SHAPE::UpdateHatching();
+}
 
-    if( !m_hatching.IsEmpty() )
-    {
-        PCB_LAYER_ID   layer = GetLayer();
-        BOX2I          bbox = GetBoundingBox();
-        SHAPE_POLY_SET holes;
-        int            maxError = ARC_LOW_DEF;
 
-        auto knockoutItem =
-                [&]( BOARD_ITEM* item )
-                {
-                    int margin = GetHatchLineSpacing() / 2;
+SHAPE_POLY_SET PCB_SHAPE::getHatchingKnockouts() const
+{
+    SHAPE_POLY_SET knockouts;
+    PCB_LAYER_ID   layer = GetLayer();
+    BOX2I          bbox = GetBoundingBox();
+    int            maxError = ARC_LOW_DEF;
 
-                    if( item->Type() == PCB_TEXTBOX_T )
-                        margin = 0;
-
-                    item->TransformShapeToPolygon( holes, layer, margin, maxError, ERROR_OUTSIDE );
-                };
-
-        for( BOARD_ITEM* item : GetBoard()->Drawings() )
-        {
-            if( item == this )
-                continue;
-
-            if( item->Type() == PCB_FIELD_T
-                    || item->Type() == PCB_TEXT_T
-                    || item->Type() == PCB_TEXTBOX_T
-                    || item->Type() == PCB_SHAPE_T )
+    auto knockoutItem =
+            [&]( BOARD_ITEM* item )
             {
-                if( item->GetLayer() == layer && item->GetBoundingBox().Intersects( bbox ) )
-                    knockoutItem( item );
-            }
-        }
+                int margin = GetHatchLineSpacing() / 2;
 
-        for( FOOTPRINT* footprint : GetBoard()->Footprints() )
+                if( item->Type() == PCB_TEXTBOX_T )
+                    margin = 0;
+
+                item->TransformShapeToPolygon( knockouts, layer, margin, maxError, ERROR_OUTSIDE );
+            };
+
+    for( BOARD_ITEM* item : GetBoard()->Drawings() )
+    {
+        if( item == this )
+            continue;
+
+        if( item->Type() == PCB_FIELD_T
+                || item->Type() == PCB_TEXT_T
+                || item->Type() == PCB_TEXTBOX_T
+                || item->Type() == PCB_SHAPE_T )
         {
-            if( footprint == GetParentFootprint() )
-                continue;
-
-            // Knockout footprint courtyard
-            holes.Append( footprint->GetCourtyard( layer ) );
-
-            // Knockout footprint fields
-            footprint->RunOnChildren(
-                    [&]( BOARD_ITEM* item )
-                    {
-                        if( ( item->Type() == PCB_FIELD_T || item->Type() == PCB_SHAPE_T )
-                                && item->GetLayer() == layer
-                                && !( item->Type() == PCB_FIELD_T && !static_cast<PCB_FIELD*>(item)->IsVisible() )
-                                && item->GetBoundingBox().Intersects( bbox ) )
-                        {
-                            knockoutItem( item );
-                        }
-                    },
-                    RECURSE_MODE::RECURSE );
-        }
-
-        if( !holes.IsEmpty() )
-        {
-            m_hatching.BooleanSubtract( holes );
-            m_hatching.Fracture();
+            if( item->GetLayer() == layer && item->GetBoundingBox().Intersects( bbox ) )
+                knockoutItem( item );
         }
     }
+
+    for( FOOTPRINT* footprint : GetBoard()->Footprints() )
+    {
+        if( footprint == GetParentFootprint() )
+            continue;
+
+        // Knockout footprint courtyard
+        knockouts.Append( footprint->GetCourtyard( layer ) );
+
+        // Knockout footprint fields
+        footprint->RunOnChildren(
+                [&]( BOARD_ITEM* item )
+                {
+                    if( ( item->Type() == PCB_FIELD_T || item->Type() == PCB_SHAPE_T )
+                            && item->GetLayer() == layer
+                            && !( item->Type() == PCB_FIELD_T && !static_cast<PCB_FIELD*>(item)->IsVisible() )
+                            && item->GetBoundingBox().Intersects( bbox ) )
+                    {
+                        knockoutItem( item );
+                    }
+                },
+                RECURSE_MODE::RECURSE );
+    }
+
+    return knockouts;
 }
 
 
@@ -512,9 +515,9 @@ void PCB_SHAPE::Normalize()
                 };
 
         // Convert a poly back to a rectangle if appropriate
-        if( m_poly.OutlineCount() == 1 && m_poly.Outline( 0 ).SegmentCount() == 4 )
+        if( GetPolyShape().OutlineCount() == 1 && GetPolyShape().Outline( 0 ).SegmentCount() == 4 )
         {
-            SHAPE_LINE_CHAIN& outline = m_poly.Outline( 0 );
+            SHAPE_LINE_CHAIN& outline = GetPolyShape().Outline( 0 );
 
             if( horizontal( outline.Segment( 0 ) )
                 && vertical( outline.Segment( 1 ) )

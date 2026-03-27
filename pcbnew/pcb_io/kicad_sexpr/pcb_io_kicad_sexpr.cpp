@@ -312,6 +312,15 @@ void PCB_IO_KICAD_SEXPR::SaveBoard( const wxString& aFileName, BOARD* aBoard,
         }
     }
 
+    PRETTIFIED_FILE_OUTPUTFORMATTER formatter( aFileName );
+    FormatBoardToFormatter( &formatter, aBoard, aProperties );
+    formatter.Finish();
+}
+
+
+void PCB_IO_KICAD_SEXPR::FormatBoardToFormatter( OUTPUTFORMATTER* aOut, BOARD* aBoard,
+                                                  const std::map<std::string, UTF8>* aProperties )
+{
     init( aProperties );
 
     m_board = aBoard;       // after init()
@@ -323,9 +332,7 @@ void PCB_IO_KICAD_SEXPR::SaveBoard( const wxString& aFileName, BOARD* aBoard,
     else
         m_board->GetEmbeddedFiles()->ClearEmbeddedFonts();
 
-    PRETTIFIED_FILE_OUTPUTFORMATTER formatter( aFileName );
-
-    m_out = &formatter;     // no ownership
+    m_out = aOut;
 
     m_out->Print( "(kicad_pcb (version %d) (generator \"pcbnew\") (generator_version %s)",
                   SEXPR_BOARD_FILE_VERSION,
@@ -334,7 +341,6 @@ void PCB_IO_KICAD_SEXPR::SaveBoard( const wxString& aFileName, BOARD* aBoard,
     Format( aBoard );
 
     m_out->Print( ")" );
-    m_out->Finish();
 
     m_out = nullptr;
 }
@@ -800,8 +806,8 @@ void PCB_IO_KICAD_SEXPR::format( const BOARD* aBoard ) const
                                                                 aBoard->Drawings().end() );
     std::set<PCB_TRACK*, PCB_TRACK::cmp_tracks> sorted_tracks( aBoard->Tracks().begin(),
                                                                aBoard->Tracks().end() );
-    std::set<PCB_POINT*, BOARD_ITEM::ptr_cmp> sorted_points( aBoard->Points().begin(),
-                                                             aBoard->Points().end() );
+    std::set<PCB_POINT*, PCB_POINT::cmp_points> sorted_points( aBoard->Points().begin(),
+                                                               aBoard->Points().end() );
     std::set<BOARD_ITEM*, BOARD_ITEM::ptr_cmp> sorted_zones( aBoard->Zones().begin(),
                                                              aBoard->Zones().end() );
     std::set<BOARD_ITEM*, BOARD_ITEM::ptr_cmp> sorted_groups( aBoard->Groups().begin(),
@@ -1411,15 +1417,15 @@ void PCB_IO_KICAD_SEXPR::format( const FOOTPRINT* aFootprint ) const
         m_out->Print( ")" );
     }
 
-    Format( (BOARD_ITEM*) &aFootprint->Reference() );
-    Format( (BOARD_ITEM*) &aFootprint->Value() );
+    Format( &aFootprint->Reference() );
+    Format( &aFootprint->Value() );
 
     std::set<PAD*, FOOTPRINT::cmp_pads> sorted_pads( aFootprint->Pads().begin(),
                                                      aFootprint->Pads().end() );
     std::set<BOARD_ITEM*, FOOTPRINT::cmp_drawings> sorted_drawings(
             aFootprint->GraphicalItems().begin(),
             aFootprint->GraphicalItems().end() );
-    std::set<PCB_POINT*, FOOTPRINT::ptr_cmp> sorted_points(
+    std::set<PCB_POINT*, PCB_POINT::cmp_points> sorted_points(
             aFootprint->Points().begin(),
             aFootprint->Points().end() );
     std::set<ZONE*, FOOTPRINT::cmp_zones> sorted_zones( aFootprint->Zones().begin(),
@@ -2462,7 +2468,7 @@ void PCB_IO_KICAD_SEXPR::format( const PCB_GROUP* aGroup ) const
             memberIds.Add( member->m_Uuid.AsString() );
     }
 
-    if( memberIds.size() <= 1 )
+    if( memberIds.empty() )
         return;
 
     m_out->Print( "(group %s", m_out->Quotew( aGroup->GetName() ).c_str() );

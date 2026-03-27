@@ -79,5 +79,6 @@ private:
 
     void SwapRows( int aRowA, int aRowB );
     void SelectRow( int aRow );
+    void onPluginAvailabilityChanged( wxCommandEvent& aEvt );
 };
 

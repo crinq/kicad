@@ -33,7 +33,13 @@ if(KICAD_BUILD_FUZZ_TESTS)
         endif()
     endfunction()
 
-    add_executable(qa_fuzz_pcb_sexpr "fuzz_pcb_sexpr.cpp" "fuzz_init.cpp")
+
+
+    add_executable(qa_fuzz_pcb_sexpr
+        ${CMAKE_SOURCE_DIR}/qa/mocks/kicad/common_mocks.cpp
+        "fuzz_pcb_sexpr.cpp"
+        "fuzz_init.cpp"
+    )
 
     target_compile_definitions( qa_fuzz_pcb_sexpr
         PRIVATE PCBNEW
@@ -75,11 +81,9 @@ if(KICAD_BUILD_FUZZ_TESTS)
             common
             qa_utils
             markdown_lib
-            scripting
             ${PCBNEW_IO_LIBRARIES}
             ${wxWidgets_LIBRARIES}
             ${GDI_PLUS_LIBRARIES}
-            ${PYTHON_LIBRARIES}
             Boost::headers
             ${PCBNEW_EXTRA_LIBS}    # -lrt must follow Boost
     )

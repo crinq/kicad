@@ -69,6 +69,9 @@ PROJECT_FILE::PROJECT_FILE( const wxString& aFullPath ) :
     m_params.emplace_back( new PARAM_LIST<wxString>( "libraries.pinned_footprint_libs",
             &m_PinnedFootprintLibs, {} ) );
 
+    m_params.emplace_back(
+            new PARAM_LIST<wxString>( "pcbnew.find_by_properties.recent_queries", &m_FindByPropertiesQueries, {} ) );
+
     m_params.emplace_back( new PARAM_PATH_LIST( "cvpcb.equivalence_files",
             &m_EquivalenceFiles, {} ) );
 
@@ -194,6 +197,12 @@ PROJECT_FILE::PROJECT_FILE( const wxString& aFullPath ) :
 
     m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.dist",
             &m_IP2581Bom.dist, wxEmptyString ) );
+
+    m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.bom_rev",
+            &m_IP2581Bom.bomRev, wxEmptyString ) );
+
+    m_params.emplace_back( new PARAM<wxString>( "board.ipc2581.sch_revision",
+            &m_IP2581Bom.schRevision, wxEmptyString ) );
 
 
     registerMigration( 1, 2, std::bind( &PROJECT_FILE::migrateSchema1To2, this ) );

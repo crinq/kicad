@@ -314,6 +314,10 @@ DRC_ITEM DRC_ITEM::trackOnPostMachinedLayer( DRCE_TRACK_ON_POST_MACHINED_LAYER,
         _HKI( "Track connected to post-machined or backdrilled layer" ),
         wxT( "track_on_post_machined_layer" ) );
 
+DRC_ITEM DRC_ITEM::trackNotCenteredOnVia( DRCE_TRACK_NOT_CENTERED_ON_VIA,
+        _HKI( "Track endpoint not centered on via" ),
+        wxT( "track_not_centered_on_via" ) );
+
 std::vector<std::reference_wrapper<RC_ITEM>> DRC_ITEM::allItemTypes( {
         DRC_ITEM::heading_electrical,
         DRC_ITEM::shortingItems,
@@ -335,6 +339,7 @@ std::vector<std::reference_wrapper<RC_ITEM>> DRC_ITEM::allItemTypes( {
         DRC_ITEM::annularWidth,
         DRC_ITEM::drillTooSmall,
         DRC_ITEM::microviaDrillTooSmall,
+        DRC_ITEM::viaDiameter,
         DRC_ITEM::courtyardsOverlap,
         DRC_ITEM::missingCourtyard,
         DRC_ITEM::malformedCourtyard,
@@ -343,6 +348,7 @@ std::vector<std::reference_wrapper<RC_ITEM>> DRC_ITEM::allItemTypes( {
         DRC_ITEM::solderMaskBridge,
         DRC_ITEM::connectionWidth,
         DRC_ITEM::trackOnPostMachinedLayer,
+        DRC_ITEM::trackNotCenteredOnVia,
         DRC_ITEM::tuningProfileImplicitRules,
 
         DRC_ITEM::heading_schematic_parity,
@@ -382,6 +388,7 @@ std::vector<std::reference_wrapper<RC_ITEM>> DRC_ITEM::allItemTypes( {
         DRC_ITEM::npthInsideCourtyard,
         DRC_ITEM::itemOnDisabledLayer,
         DRC_ITEM::unresolvedVariable,
+        DRC_ITEM::assertionFailure,
         DRC_ITEM::footprintTypeMismatch,
         DRC_ITEM::libFootprintIssues,
         DRC_ITEM::libFootprintMismatch,
@@ -466,8 +473,9 @@ std::shared_ptr<DRC_ITEM> DRC_ITEM::Create( int aErrorCode )
     case DRCE_NONMIRRORED_TEXT_ON_BACK_LAYER:      return std::make_shared<DRC_ITEM>( nonMirroredTextOnBackLayer );
     case DRCE_MISSING_TUNING_PROFILE:   return std::make_shared<DRC_ITEM>( missingTuningProfile );
     case DRCE_TRACK_ON_POST_MACHINED_LAYER: return std::make_shared<DRC_ITEM>( trackOnPostMachinedLayer );
+    case DRCE_TRACK_NOT_CENTERED_ON_VIA:    return std::make_shared<DRC_ITEM>( trackNotCenteredOnVia );
+
     default:
-        wxFAIL_MSG( wxT( "Unknown DRC error code" ) );
         return nullptr;
     }
 }

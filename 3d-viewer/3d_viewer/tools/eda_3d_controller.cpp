@@ -22,6 +22,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  */
 
+#include <3d_rendering/opengl/render_3d_opengl.h> // Must be included before any GL header
+
 #include <tool/actions.h>
 #include <tool/tool_manager.h>
 #include <eda_3d_canvas.h>
@@ -33,7 +35,6 @@
 #include <dialogs/dialog_export_3d_image.h>
 #include <dialogs/panel_preview_3d_model.h>
 #include <dialogs/appearance_controls_3D.h>
-#include <3d_rendering/opengl/render_3d_opengl.h>
 
 
 bool EDA_3D_CONTROLLER::Init()
@@ -383,6 +384,15 @@ int EDA_3D_CONTROLLER::ToggleRaytracing( const TOOL_EVENT& aEvent )
 }
 
 
+int EDA_3D_CONTROLLER::ToggleShowMissingModels( const TOOL_EVENT& aEvent )
+{
+    m_boardAdapter->m_Cfg->m_Render.show_missing_models = !m_boardAdapter->m_Cfg->m_Render.show_missing_models;
+    m_canvas->ReloadRequest();
+    m_canvas->Request_refresh();
+    return 0;
+}
+
+
 int EDA_3D_CONTROLLER::ExportImage( const TOOL_EVENT& aEvent )
 {
     EDA_BASE_FRAME* frame = dynamic_cast<EDA_BASE_FRAME*>( m_toolMgr->GetToolHolder() );
@@ -420,6 +430,7 @@ void EDA_3D_CONTROLLER::setTransitions()
     // Miscellaneous control
     Go( &EDA_3D_CONTROLLER::ReloadBoard,        EDA_3D_ACTIONS::reloadBoard.MakeEvent() );
     Go( &EDA_3D_CONTROLLER::ToggleRaytracing,   EDA_3D_ACTIONS::toggleRaytacing.MakeEvent() );
+    Go( &EDA_3D_CONTROLLER::ToggleShowMissingModels, EDA_3D_ACTIONS::toggleShowMissingModels.MakeEvent() );
     Go( &EDA_3D_CONTROLLER::ExportImage,        EDA_3D_ACTIONS::copyToClipboard.MakeEvent() );
     Go( &EDA_3D_CONTROLLER::ExportImage,        EDA_3D_ACTIONS::exportImage.MakeEvent() );
 

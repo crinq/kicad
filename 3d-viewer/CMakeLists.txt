@@ -74,6 +74,7 @@ set(3D-VIEWER_SRCS
     ${DIR_RAY_3D}/round_segment_3d.cpp
     ${DIR_RAY_3D}/triangle_3d.cpp
     3d_rendering/buffers_debug.cpp
+    3d_rendering/3d_placeholder_utils.cpp
     3d_rendering/render_3d_base.cpp
     3d_rendering/color_rgba.cpp
     3d_rendering/image.cpp
@@ -110,6 +111,18 @@ set(3D-VIEWER_SRCS
 
 add_library(3d-viewer STATIC ${3D-VIEWER_SRCS})
 add_dependencies( 3d-viewer pcbcommon )
+
+if( KICAD_USE_PCH )
+    target_precompile_headers( 3d-viewer
+        PRIVATE
+            <3d_canvas/board_adapter.h>
+            <clipper2/clipper.h>
+            <kiid.h>
+            <board.h>
+            <pgm_base.h>
+            <wx/wx.h>
+            )
+endif()
 
 target_link_libraries( 3d-viewer
     PRIVATE

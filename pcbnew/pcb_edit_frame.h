@@ -27,7 +27,6 @@
 #include <settings/app_settings.h>
 #include <variant>
 
-class ACTION_PLUGIN;
 class PCB_SCREEN;
 class BOARD;
 class BOARD_COMMIT;
@@ -44,6 +43,7 @@ class PCB_GROUP;
 class PCB_DIMENSION_BASE;
 class DRC;
 class DIALOG_FIND;
+class DIALOG_FIND_BY_PROPERTIES;
 class DIALOG_PLOT;
 class ZONE;
 class GENERAL_COLLECTOR;
@@ -102,16 +102,6 @@ public:
     bool IsContentModified() const override;
 
     /**
-     * Synchronize the environment variables from KiCad's environment into the Python interpreter.
-     */
-    void PythonSyncEnvironmentVariables();
-
-    /**
-     * Synchronize the project name from KiCad's environment into the Python interpreter.
-     */
-    void PythonSyncProjectName();
-
-    /**
      * Update the layer manager and other widgets from the board setup
      * (layer and items visibility, colors ...)
      */
@@ -152,6 +142,16 @@ public:
     void ShowFindDialog();
 
     /**
+     * Show the Find by Properties dialog.
+     */
+    void ShowFindByPropertiesDialog();
+
+    /**
+     * Notify the Find by Properties dialog that the selection has changed.
+     */
+    void NotifyFindByPropertiesDialog();
+
+    /**
      * Find the next item using our existing search parameters.
      */
     void FindNext( bool reverse = false );
@@ -174,6 +174,12 @@ public:
      * will be selected.
      */
     void UpdateVariantSelectionCtrl();
+
+    /**
+     * Set the current variant on the board and update the drawing sheet's cached
+     * variant name and description accordingly.
+     */
+    void SetCurrentVariant( const wxString& aVariantName );
 
     /**
      * Event handler for variant selection changes in the toolbar.
@@ -199,13 +205,13 @@ public:
      * Return true if button visibility action plugin setting was set to true
      * or it is unset and plugin defaults to true.
      */
-    static bool GetActionPluginButtonVisible( const wxString& aPluginPath, bool aPluginDefault );
+    static bool GetPluginActionButtonVisible( const wxString& aPluginPath, bool aPluginDefault );
 
     /**
      * Return ordered list of plugins in sequence in which they should appear on toolbar or
-     * in settings.  Handles both legacy (SWIG) and API plugins, so returns a heterogenous list.
+     * in settings.
      */
-    static std::vector<std::variant<ACTION_PLUGIN*, const PLUGIN_ACTION*>> GetOrderedActionPlugins();
+    static std::vector<const PLUGIN_ACTION*> GetOrderedPluginActions();
 
     void SaveProjectLocalSettings() override;
 
@@ -537,6 +543,7 @@ public:
      * @param aCommit commit that should store the changes.
      */
     void ExchangeFootprint( FOOTPRINT* aExisting, FOOTPRINT* aNew, BOARD_COMMIT& aCommit,
+                            bool matchPadPositions,
                             bool deleteExtraTexts = true,
                             bool resetTextLayers = true,
                             bool resetTextEffects = true,
@@ -744,37 +751,6 @@ protected:
      */
     void SwitchCanvas( EDA_DRAW_PANEL_GAL::GAL_TYPE aCanvasType ) override;
 
-    /**
-     * Fill action menu with all registered action plugins
-     */
-    void buildActionPluginMenus( ACTION_MENU* aActionMenu );
-
-    /**
-     * Append action plugin buttons to given toolbar
-     */
-    void addActionPluginTools( ACTION_TOOLBAR* aToolbar );
-
-    /**
-     * Execute action plugin's Run() method and updates undo buffer.
-     *
-     * @param aActionPlugin action plugin
-     */
-    void RunActionPlugin( ACTION_PLUGIN* aActionPlugin );
-
-    /**
-     * Launched by the menu when an action is called.
-     *
-     * @param aEvent sent by wx
-     */
-    void OnActionPluginMenu( wxCommandEvent& aEvent);
-
-    /**
-     * Launched by the button when an action is called.
-     *
-     * @param aEvent sent by wx
-     */
-    void OnActionPluginButton( wxCommandEvent& aEvent );
-
     PLUGIN_ACTION_SCOPE PluginActionScope() const override { return PLUGIN_ACTION_SCOPE::PCB; }
 
     /**
@@ -843,6 +819,7 @@ public:
 
     void StartCrossProbeFlash( const std::vector<BOARD_ITEM*>& aItems );
     void OnCrossProbeFlashTimer( wxTimerEvent& aEvent );
+    void UpdateProperties() override;
 
 private:
     friend struct PCB::IFACE;
@@ -855,14 +832,15 @@ private:
      * the list of assignable hot keys since it's only available as an advanced configuration
      * option.
      */
-    TOOL_ACTION*           m_exportNetlistAction;
+    TOOL_ACTION* m_exportNetlistAction;
 
-    DIALOG_FIND*           m_findDialog;
-    DIALOG_BOOK_REPORTER*  m_inspectDrcErrorDlg;
-    DIALOG_BOOK_REPORTER*  m_inspectClearanceDlg;
-    DIALOG_BOOK_REPORTER*  m_inspectConstraintsDlg;
-    DIALOG_BOOK_REPORTER*  m_footprintDiffDlg;
-    DIALOG_BOARD_SETUP*    m_boardSetupDlg;
+    DIALOG_FIND*               m_findDialog;
+    DIALOG_FIND_BY_PROPERTIES* m_findByPropertiesDialog;
+    DIALOG_BOOK_REPORTER*      m_inspectDrcErrorDlg;
+    DIALOG_BOOK_REPORTER*      m_inspectClearanceDlg;
+    DIALOG_BOOK_REPORTER*      m_inspectConstraintsDlg;
+    DIALOG_BOOK_REPORTER*      m_footprintDiffDlg;
+    DIALOG_BOARD_SETUP*        m_boardSetupDlg;
 
     std::vector<LIB_ID>    m_designBlockHistoryList;
     PCB_DESIGN_BLOCK_PANE* m_designBlocksPane;

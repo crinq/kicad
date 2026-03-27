@@ -503,7 +503,7 @@ void DIALOG_ERC::OnRunERCClick( wxCommandEvent& event )
 
     m_runningResultsBook->ChangeSelection( 0 );   // Display the "Tests Running..." tab
     m_messages->Clear();
-    wxSafeYield();                                // Allow time slice to refresh Messages
+    Update();                                     // Repaint only, don't enter the full event loop
 
     m_running = true;
     m_sdbSizer1Cancel->SetLabel( _( "Cancel" ) );
@@ -542,7 +542,7 @@ void DIALOG_ERC::OnRunERCClick( wxCommandEvent& event )
         m_messages->Report( _( "Done.<br><br>" ), RPT_SEVERITY_INFO );
 
     Raise();
-    wxSafeYield();                                // Allow time slice to refresh Messages
+    Update();                                     // Repaint only, don't enter the full event loop
 
     m_running = false;
     m_sdbSizer1Cancel->SetLabel( _( "Close" ) );

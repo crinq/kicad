@@ -22,6 +22,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  */
 
+#include "teardrop/teardrop.h"
 
 #include <confirm.h>
 
@@ -32,10 +33,8 @@
 #include <board_commit.h>
 
 #include <connectivity/connectivity_data.h>
-#include <teardrop/teardrop.h>
 #include <drc/drc_rtree.h>
 #include <geometry/shape_line_chain.h>
-#include <geometry/rtree.h>
 #include <convert_basic_shapes_to_polygon.h>
 #include <bezier_curves.h>
 
@@ -62,7 +61,7 @@ ZONE* TEARDROP_MANAGER::createTeardrop( TEARDROP_VARIANT aTeardropVariant,
 
     // Create a deterministic UUID from the track and candidate UUIDs so that teardrops
     // maintain stable ordering in the output file across save/load cycles.
-    const_cast<KIID&>( teardrop->m_Uuid ) = KIID::Combine( aTrack->m_Uuid, aCandidate->m_Uuid );
+    teardrop->SetUuidDirect( KIID::Combine( aTrack->m_Uuid, aCandidate->m_Uuid ) );
 
     // teardrop settings are the last zone settings used by a zone dialog.
     // override them by default.
@@ -108,7 +107,7 @@ ZONE* TEARDROP_MANAGER::createTeardropMask( TEARDROP_VARIANT aTeardropVariant,
     // to differentiate from the copper teardrop zone.
     KIID maskUuid = KIID::Combine( aTrack->m_Uuid, aCandidate->m_Uuid );
     maskUuid.Increment();
-    const_cast<KIID&>( teardrop->m_Uuid ) = maskUuid;
+    teardrop->SetUuidDirect( maskUuid );
 
     teardrop->SetTeardropAreaType( aTeardropVariant == TD_TYPE_PADVIA ? TEARDROP_TYPE::TD_VIAPAD
                                                                       : TEARDROP_TYPE::TD_TRACKEND );
@@ -530,5 +529,3 @@ void TEARDROP_MANAGER::AddTeardropsOnTracks( BOARD_COMMIT& aCommit,
         }
     }
 }
-
-

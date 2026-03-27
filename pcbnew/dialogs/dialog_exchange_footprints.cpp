@@ -102,14 +102,15 @@ DIALOG_EXCHANGE_FOOTPRINTS::DIALOG_EXCHANGE_FOOTPRINTS( PCB_EDIT_FRAME* aParent,
     m_upperSizer->Layout();
 
     // initialize controls based on update mode in case there is no saved state yet
-    m_removeExtraBox->SetValue(          m_updateMode ? false : false );
+    m_removeExtraBox->SetValue(          false );
     m_resetTextItemLayers->SetValue(     m_updateMode ? false : true  );
     m_resetTextItemEffects->SetValue(    m_updateMode ? false : true  );
     m_resetTextItemPositions->SetValue(  m_updateMode ? false : true  );
     m_resetTextItemContent->SetValue(    m_updateMode ? false : true  );
     m_resetFabricationAttrs->SetValue(   m_updateMode ? false : true  );
-    m_resetClearanceOverrides->SetValue( m_updateMode ? true  : true  );
-    m_reset3DModels->SetValue(           m_updateMode ? true  : true  );
+    m_resetClearanceOverrides->SetValue( true );
+    m_reset3DModels->SetValue(           true );
+    m_matchPadPositions->SetValue(       true );
 
     // initialize match-mode
     if( m_updateMode )
@@ -293,6 +294,7 @@ void DIALOG_EXCHANGE_FOOTPRINTS::checkAll( bool aCheck )
         m_resetFabricationAttrs->SetValue( aCheck );
         m_resetClearanceOverrides->SetValue( aCheck );
         m_reset3DModels->SetValue( aCheck );
+        m_matchPadPositions->SetValue( aCheck );
 }
 
 
@@ -380,6 +382,7 @@ void DIALOG_EXCHANGE_FOOTPRINTS::processFootprint( FOOTPRINT* aFootprint, const 
     bool updated = !m_updateMode || aFootprint->FootprintNeedsUpdate( newFootprint );
 
     m_parent->ExchangeFootprint( aFootprint, newFootprint, m_commit,
+                                 m_matchPadPositions->GetValue(),
                                  m_removeExtraBox->GetValue(),
                                  m_resetTextItemLayers->GetValue(),
                                  m_resetTextItemEffects->GetValue(),
@@ -452,5 +455,3 @@ void DIALOG_EXCHANGE_FOOTPRINTS::ViewAndSelectFootprint( wxCommandEvent& event )
         frame->Destroy();
     }
 }
-
-

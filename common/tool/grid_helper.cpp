@@ -37,6 +37,7 @@
 #include <tool/tools_holder.h>
 #include <view/view.h>
 #include <settings/app_settings.h>
+#include <gal/painter.h>
 
 
 GRID_HELPER::GRID_HELPER() :
@@ -63,8 +64,12 @@ GRID_HELPER::GRID_HELPER( TOOL_MANAGER* aToolMgr, int aConstructionLayer ) :
     if( !m_toolMgr )
         return;
 
-    KIGFX::VIEW* view = m_toolMgr->GetView();
-    wxUnusedVar( aConstructionLayer );
+    KIGFX::VIEW*            view = m_toolMgr->GetView();
+    KIGFX::RENDER_SETTINGS* settings = view->GetPainter()->GetSettings();
+    KIGFX::COLOR4D          constructionColor = settings->GetLayerColor( aConstructionLayer );
+
+    m_constructionGeomPreview.SetColor( constructionColor );
+    m_constructionGeomPreview.SetPersistentColor( constructionColor );
 
     view->Add( &m_constructionGeomPreview );
     view->SetVisible( &m_constructionGeomPreview, false );
@@ -434,7 +439,11 @@ VECTOR2I GRID_HELPER::AlignGrid( const VECTOR2I& aPoint ) const
 VECTOR2I GRID_HELPER::AlignGrid( const VECTOR2I& aPoint, const VECTOR2D& aGrid,
                                  const VECTOR2D& aOffset ) const
 {
-    return computeNearest( aPoint, aGrid, aOffset );
+    // Round the grid size and offset rather than relying on the implicit VECTOR2D->VECTOR2I
+    // truncation in computeNearest. Grid sizes that aren't exact in IEEE 754 (e.g., 0.254mm =
+    // 10 mil) would otherwise truncate to the wrong integer (253999 instead of 254000),
+    // producing positions that aren't true grid multiples.
+    return computeNearest( aPoint, KiROUND( aGrid ), KiROUND( aOffset ) );
 }
 
 

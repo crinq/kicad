@@ -378,7 +378,7 @@ FOOTPRINT* BOARD_NETLIST_UPDATER::replaceFootprint( NETLIST& aNetlist, FOOTPRINT
              // Expand the footprint pad layers
              newFootprint->FixUpPadsForBoard( m_board );
 
-             m_frame->ExchangeFootprint( aFootprint, newFootprint, m_commit );
+             m_frame->ExchangeFootprint( aFootprint, newFootprint, m_commit, true );
 
              msg.Printf( _( "Changed %s footprint from '%s' to '%s'."),
                          aFootprint->GetReference(),
@@ -392,63 +392,85 @@ FOOTPRINT* BOARD_NETLIST_UPDATER::replaceFootprint( NETLIST& aNetlist, FOOTPRINT
  }
 
 
-bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
-                                                       COMPONENT* aNetlistComponent )
+bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aFootprint, COMPONENT* aNetlistComponent )
 {
     wxString msg;
+
+    const COMPONENT_VARIANT* firstAssociatedVariant = nullptr;
+
+    if( aFootprint->GetFPID() != aNetlistComponent->GetFPID() )
+    {
+        for( const auto& [_, test] : aNetlistComponent->GetVariants() )
+        {
+            if( test.m_fields.count( GetCanonicalFieldName( FIELD_T::FOOTPRINT ) )
+                && aFootprint->GetFPIDAsString() == test.m_fields.at( GetCanonicalFieldName( FIELD_T::FOOTPRINT ) ) )
+            {
+                firstAssociatedVariant = &test;
+                break;
+            }
+        }
+    }
 
     // Create a copy only if the footprint has not been added during this update
     FOOTPRINT* copy = nullptr;
 
-    if( !m_commit.GetStatus( aPcbFootprint ) )
+    if( !m_commit.GetStatus( aFootprint ) )
     {
-        copy = static_cast<FOOTPRINT*>( aPcbFootprint->Clone() );
+        copy = static_cast<FOOTPRINT*>( aFootprint->Clone() );
         copy->SetParentGroup( nullptr );
     }
 
     bool       changed = false;
 
     // Test for reference designator field change.
-    if( aPcbFootprint->GetReference() != aNetlistComponent->GetReference() )
+    if( aFootprint->GetReference() != aNetlistComponent->GetReference() )
     {
         if( m_isDryRun )
         {
             msg.Printf( _( "Change %s reference designator to %s." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         aNetlistComponent->GetReference() );
         }
         else
         {
             msg.Printf( _( "Changed %s reference designator to %s." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         aNetlistComponent->GetReference() );
 
             changed = true;
-            aPcbFootprint->SetReference( aNetlistComponent->GetReference() );
+            aFootprint->SetReference( aNetlistComponent->GetReference() );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
     // Test for value field change.
-    if( aPcbFootprint->GetValue() != aNetlistComponent->GetValue() )
+    wxString netlistValue = aNetlistComponent->GetValue();
+
+    if( firstAssociatedVariant != nullptr
+        && firstAssociatedVariant->m_fields.count( GetCanonicalFieldName( FIELD_T::VALUE ) ) )
+    {
+        netlistValue = firstAssociatedVariant->m_fields.at( GetCanonicalFieldName( FIELD_T::VALUE ) );
+    }
+
+    if( aFootprint->GetValue() != netlistValue )
     {
         if( m_isDryRun )
         {
             msg.Printf( _( "Change %s value from %s to %s." ),
-                        aPcbFootprint->GetReference(),
-                        EscapeHTML( aPcbFootprint->GetValue() ),
-                        EscapeHTML( aNetlistComponent->GetValue() ) );
+                        aFootprint->GetReference(),
+                        EscapeHTML( aFootprint->GetValue() ),
+                        EscapeHTML( netlistValue ) );
         }
         else
         {
             msg.Printf( _( "Changed %s value from %s to %s." ),
-                        aPcbFootprint->GetReference(),
-                        EscapeHTML( aPcbFootprint->GetValue() ),
-                        EscapeHTML( aNetlistComponent->GetValue() ) );
+                        aFootprint->GetReference(),
+                        EscapeHTML( aFootprint->GetValue() ),
+                        EscapeHTML( netlistValue ) );
 
             changed = true;
-            aPcbFootprint->SetValue( aNetlistComponent->GetValue() );
+            aFootprint->SetValue( netlistValue );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
@@ -460,24 +482,24 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
     if( !aNetlistComponent->GetKIIDs().empty() )
         new_path.push_back( aNetlistComponent->GetKIIDs().front() );
 
-    if( aPcbFootprint->GetPath() != new_path )
+    if( aFootprint->GetPath() != new_path )
     {
         if( m_isDryRun )
         {
             msg.Printf( _( "Update %s symbol association from %s to %s." ),
-                        aPcbFootprint->GetReference(),
-                        EscapeHTML( aPcbFootprint->GetPath().AsString() ),
+                        aFootprint->GetReference(),
+                        EscapeHTML( aFootprint->GetPath().AsString() ),
                         EscapeHTML( new_path.AsString() ) );
         }
         else
         {
             msg.Printf( _( "Updated %s symbol association from %s to %s." ),
-                        aPcbFootprint->GetReference(),
-                        EscapeHTML( aPcbFootprint->GetPath().AsString() ),
+                        aFootprint->GetReference(),
+                        EscapeHTML( aFootprint->GetPath().AsString() ),
                         EscapeHTML( new_path.AsString() ) );
 
             changed = true;
-            aPcbFootprint->SetPath( new_path );
+            aFootprint->SetPath( new_path );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
@@ -485,7 +507,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
 
     nlohmann::ordered_map<wxString, wxString> fpFieldsAsMap;
 
-    for( PCB_FIELD* field : aPcbFootprint->GetFields() )
+    for( PCB_FIELD* field : aFootprint->GetFields() )
     {
         // These fields are individually checked above
         if( field->IsReference() || field->IsValue() || field->IsComponentClass() )
@@ -505,9 +527,14 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
     // Remove any component class fields - these are not editable in the pcb editor
     compFields.erase( wxT( "Component Class" ) );
 
-    // Fields are stored as an ordered map, but we don't (yet) support reordering
-    // the footprint fields to match the symbol, so we manually check the fields
-    // in the order they are stored in the symbol.
+    if( firstAssociatedVariant != nullptr )
+    {
+        for( const auto& [name, value] : firstAssociatedVariant->m_fields )
+            compFields[name] = value;
+    }
+
+    // Fields are stored as an ordered map, but we don't (yet) support reordering the footprint fields to
+    // match the symbol, so we manually check the fields in the order they are stored in the symbol.
     bool same = true;
     bool remove_only = true;
 
@@ -536,12 +563,12 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
         {
             if( m_updateFields && ( !remove_only || m_removeExtraFields ) )
             {
-                msg.Printf( _( "Update %s fields." ), aPcbFootprint->GetReference() );
+                msg.Printf( _( "Update %s fields." ), aFootprint->GetReference() );
                 m_reporter->Report( msg, RPT_SEVERITY_ACTION );
             }
 
             // Remove fields that aren't present in the symbol
-            for( PCB_FIELD* field : aPcbFootprint->GetFields() )
+            for( PCB_FIELD* field : aFootprint->GetFields() )
             {
                 if( field->IsMandatory() )
                     continue;
@@ -550,8 +577,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
                 {
                     if( m_removeExtraFields )
                     {
-                        msg.Printf( _( "Remove %s footprint fields not in symbol." ),
-                                    aPcbFootprint->GetReference() );
+                        msg.Printf( _( "Remove %s footprint fields not in symbol." ), aFootprint->GetReference() );
                         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
                     }
 
@@ -563,7 +589,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
         {
             if( m_updateFields && ( !remove_only || m_removeExtraFields ) )
             {
-                msg.Printf( _( "Updated %s fields." ), aPcbFootprint->GetReference() );
+                msg.Printf( _( "Updated %s fields." ), aFootprint->GetReference() );
                 m_reporter->Report( msg, RPT_SEVERITY_ACTION );
 
                 changed = true;
@@ -571,24 +597,24 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
                 // Add or change field value
                 for( auto& [name, value] : compFields )
                 {
-                    if( aPcbFootprint->HasField( name ) )
+                    if( aFootprint->HasField( name ) )
                     {
-                        aPcbFootprint->GetField( name )->SetText( value );
+                        aFootprint->GetField( name )->SetText( value );
                     }
                     else
                     {
-                        PCB_FIELD* newField = new PCB_FIELD( aPcbFootprint, FIELD_T::USER );
-                        aPcbFootprint->Add( newField );
+                        PCB_FIELD* newField = new PCB_FIELD( aFootprint, FIELD_T::USER );
+                        aFootprint->Add( newField );
 
                         newField->SetName( name );
                         newField->SetText( value );
                         newField->SetVisible( false );
-                        newField->SetLayer( aPcbFootprint->GetLayer() == F_Cu ? F_Fab : B_Fab );
+                        newField->SetLayer( aFootprint->GetLayer() == F_Cu ? F_Fab : B_Fab );
 
                         // Give the relative position (0,0) in footprint
-                        newField->SetPosition( aPcbFootprint->GetPosition() );
+                        newField->SetPosition( aFootprint->GetPosition() );
                         // Give the footprint orientation
-                        newField->Rotate( aPcbFootprint->GetPosition(), aPcbFootprint->GetOrientation() );
+                        newField->Rotate( aFootprint->GetPosition(), aFootprint->GetOrientation() );
 
                         if( m_frame )
                             newField->StyleFromSettings( m_frame->GetDesignSettings(), true );
@@ -601,7 +627,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
                 bool warned = false;
 
                 std::vector<PCB_FIELD*> fieldList;
-                aPcbFootprint->GetFields( fieldList, false );
+                aFootprint->GetFields( fieldList, false );
 
                 for( PCB_FIELD* field : fieldList )
                 {
@@ -613,12 +639,11 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
                         if( !warned )
                         {
                             warned = true;
-                            msg.Printf( _( "Removed %s footprint fields not in symbol." ),
-                                        aPcbFootprint->GetReference() );
+                            msg.Printf( _( "Removed %s footprint fields not in symbol." ), aFootprint->GetReference() );
                             m_reporter->Report( msg, RPT_SEVERITY_ACTION );
                         }
 
-                        aPcbFootprint->Remove( field );
+                        aFootprint->Remove( field );
 
                         if( m_frame )
                             m_frame->GetCanvas()->GetView()->Remove( field );
@@ -647,202 +672,198 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
     if( aNetlistComponent->GetProperties().count( wxT( "ki_fp_filters" ) ) > 0 )
         fpFilters = aNetlistComponent->GetProperties().at( wxT( "ki_fp_filters" ) );
 
-    if( sheetname != aPcbFootprint->GetSheetname() )
+    if( sheetname != aFootprint->GetSheetname() )
     {
         if( m_isDryRun )
         {
             msg.Printf( _( "Update %s sheetname to '%s'." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         EscapeHTML( sheetname ) );
         }
         else
         {
-            aPcbFootprint->SetSheetname( sheetname );
+            aFootprint->SetSheetname( sheetname );
             msg.Printf( _( "Updated %s sheetname to '%s'." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         EscapeHTML( sheetname ) );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( sheetfile != aPcbFootprint->GetSheetfile() )
+    if( sheetfile != aFootprint->GetSheetfile() )
     {
         if( m_isDryRun )
         {
             msg.Printf( _( "Update %s sheetfile to '%s'." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         EscapeHTML( sheetfile ) );
         }
         else
         {
-            aPcbFootprint->SetSheetfile( sheetfile );
+            aFootprint->SetSheetfile( sheetfile );
             msg.Printf( _( "Updated %s sheetfile to '%s'." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         EscapeHTML( sheetfile ) );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( fpFilters != aPcbFootprint->GetFilters() )
+    if( fpFilters != aFootprint->GetFilters() )
     {
         if( m_isDryRun )
         {
             msg.Printf( _( "Update %s footprint filters to '%s'." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         EscapeHTML( fpFilters ) );
         }
         else
         {
-            aPcbFootprint->SetFilters( fpFilters );
+            aFootprint->SetFilters( fpFilters );
             msg.Printf( _( "Updated %s footprint filters to '%s'." ),
-                        aPcbFootprint->GetReference(),
+                        aFootprint->GetReference(),
                         EscapeHTML( fpFilters ) );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( ( aNetlistComponent->GetProperties().count( wxT( "exclude_from_bom" ) ) > 0 )
-            != ( ( aPcbFootprint->GetAttributes() & FP_EXCLUDE_FROM_BOM ) > 0 ) )
+    bool netlistExcludeFromBOM = aNetlistComponent->GetProperties().count( wxT( "exclude_from_bom" ) ) > 0;
+
+    if( firstAssociatedVariant != nullptr && firstAssociatedVariant->m_hasExcludedFromBOM )
+        netlistExcludeFromBOM = firstAssociatedVariant->m_excludedFromBOM;
+
+    if( netlistExcludeFromBOM != ( ( aFootprint->GetAttributes() & FP_EXCLUDE_FROM_BOM ) > 0 ) )
     {
         if( m_isDryRun )
         {
-            if( aNetlistComponent->GetProperties().count( wxT( "exclude_from_bom" ) ) )
-            {
-                msg.Printf( _( "Add %s 'exclude from BOM' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
-            }
+            if( netlistExcludeFromBOM )
+                msg.Printf( _( "Add %s 'exclude from BOM' fabrication attribute." ), aFootprint->GetReference() );
             else
-            {
-                msg.Printf( _( "Remove %s 'exclude from BOM' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
-            }
+                msg.Printf( _( "Remove %s 'exclude from BOM' fabrication attribute." ), aFootprint->GetReference() );
         }
         else
         {
-            int attributes = aPcbFootprint->GetAttributes();
+            int attributes = aFootprint->GetAttributes();
 
-            if( aNetlistComponent->GetProperties().count( wxT( "exclude_from_bom" ) ) )
+            if( netlistExcludeFromBOM )
             {
                 attributes |= FP_EXCLUDE_FROM_BOM;
-                msg.Printf( _( "Added %s 'exclude from BOM' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                msg.Printf( _( "Added %s 'exclude from BOM' fabrication attribute." ), aFootprint->GetReference() );
             }
             else
             {
                 attributes &= ~FP_EXCLUDE_FROM_BOM;
-                msg.Printf( _( "Removed %s 'exclude from BOM' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                msg.Printf( _( "Removed %s 'exclude from BOM' fabrication attribute." ), aFootprint->GetReference() );
             }
 
             changed = true;
-            aPcbFootprint->SetAttributes( attributes );
+            aFootprint->SetAttributes( attributes );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( ( aNetlistComponent->GetProperties().count( wxT( "dnp" ) ) > 0 )
-            != ( ( aPcbFootprint->GetAttributes() & FP_DNP ) > 0 ) )
+    bool netlistDNP = aNetlistComponent->GetProperties().count( wxT( "dnp" ) ) > 0;
+
+    if( firstAssociatedVariant != nullptr && firstAssociatedVariant->m_hasDnp )
+        netlistDNP = firstAssociatedVariant->m_dnp;
+
+    if( netlistDNP != ( ( aFootprint->GetAttributes() & FP_DNP ) > 0 ) )
     {
         if( m_isDryRun )
         {
-            if( aNetlistComponent->GetProperties().count( wxT( "dnp" ) ) )
-            {
-                msg.Printf( _( "Add %s 'Do not place' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
-            }
+            if( netlistDNP )
+                msg.Printf( _( "Add %s 'Do not place' fabrication attribute." ), aFootprint->GetReference() );
             else
-            {
-                msg.Printf( _( "Remove %s 'Do not place' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
-            }
+                msg.Printf( _( "Remove %s 'Do not place' fabrication attribute." ), aFootprint->GetReference() );
         }
         else
         {
-            int attributes = aPcbFootprint->GetAttributes();
+            int attributes = aFootprint->GetAttributes();
 
-            if( aNetlistComponent->GetProperties().count( wxT( "dnp" ) ) )
+            if( netlistDNP )
             {
                 attributes |= FP_DNP;
-                msg.Printf( _( "Added %s 'Do not place' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                msg.Printf( _( "Added %s 'Do not place' fabrication attribute." ), aFootprint->GetReference() );
             }
             else
             {
                 attributes &= ~FP_DNP;
-                msg.Printf( _( "Removed %s 'Do not place' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                msg.Printf( _( "Removed %s 'Do not place' fabrication attribute." ), aFootprint->GetReference() );
             }
 
             changed = true;
-            aPcbFootprint->SetAttributes( attributes );
+            aFootprint->SetAttributes( attributes );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( ( aNetlistComponent->GetProperties().count( wxT( "exclude_from_pos_files" ) ) > 0 )
-            != ( ( aPcbFootprint->GetAttributes() & FP_EXCLUDE_FROM_POS_FILES ) > 0 ) )
+    bool netlistExcludeFromPosFiles = aNetlistComponent->GetProperties().count( wxT( "exclude_from_pos_files" ) ) > 0;
+
+    if( firstAssociatedVariant != nullptr && firstAssociatedVariant->m_hasExcludedFromPosFiles )
+        netlistExcludeFromPosFiles = firstAssociatedVariant->m_excludedFromPosFiles;
+
+    if( netlistExcludeFromPosFiles != ( ( aFootprint->GetAttributes() & FP_EXCLUDE_FROM_POS_FILES ) > 0 ) )
     {
         if( m_isDryRun )
         {
-            if( aNetlistComponent->GetProperties().count( wxT( "exclude_from_pos_files" ) ) )
+            if( netlistExcludeFromPosFiles )
             {
                 msg.Printf( _( "Add %s 'exclude from position files' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
             else
             {
                 msg.Printf( _( "Remove %s 'exclude from position files' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
         }
         else
         {
-            int attributes = aPcbFootprint->GetAttributes();
+            int attributes = aFootprint->GetAttributes();
 
-            if( aNetlistComponent->GetProperties().count( wxT( "exclude_from_pos_files" ) ) )
+            if( netlistExcludeFromPosFiles )
             {
                 attributes |= FP_EXCLUDE_FROM_POS_FILES;
                 msg.Printf( _( "Added %s 'exclude from position files' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
             else
             {
                 attributes &= ~FP_EXCLUDE_FROM_POS_FILES;
                 msg.Printf( _( "Removed %s 'exclude from position files' fabrication attribute." ),
-                            aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
 
             changed = true;
-            aPcbFootprint->SetAttributes( attributes );
+            aFootprint->SetAttributes( attributes );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
     if( aNetlistComponent->GetDuplicatePadNumbersAreJumpers()
-        != aPcbFootprint->GetDuplicatePadNumbersAreJumpers() )
+        != aFootprint->GetDuplicatePadNumbersAreJumpers() )
     {
         bool value = aNetlistComponent->GetDuplicatePadNumbersAreJumpers();
 
         if( !m_isDryRun )
         {
             changed = true;
-            aPcbFootprint->SetDuplicatePadNumbersAreJumpers( value );
+            aFootprint->SetDuplicatePadNumbersAreJumpers( value );
 
             if( value )
             {
                 msg.Printf( _( "Added %s 'duplicate pad numbers are jumpers' attribute." ),
-                                aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
             else
             {
                 msg.Printf( _( "Removed %s 'duplicate pad numbers are jumpers' attribute." ),
-                                aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
         }
         else
@@ -850,36 +871,36 @@ bool BOARD_NETLIST_UPDATER::updateFootprintParameters( FOOTPRINT* aPcbFootprint,
             if( value )
             {
                 msg.Printf( _( "Add %s 'duplicate pad numbers are jumpers' attribute." ),
-                                aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
             else
             {
                 msg.Printf( _( "Remove %s 'duplicate pad numbers are jumpers' attribute." ),
-                                aPcbFootprint->GetReference() );
+                            aFootprint->GetReference() );
             }
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
-    if( aNetlistComponent->JumperPadGroups() != aPcbFootprint->JumperPadGroups() )
+    if( aNetlistComponent->JumperPadGroups() != aFootprint->JumperPadGroups() )
     {
         if( !m_isDryRun )
         {
             changed = true;
-            aPcbFootprint->JumperPadGroups() = aNetlistComponent->JumperPadGroups();
-            msg.Printf( _( "Updated %s jumper pad groups" ), aPcbFootprint->GetReference() );
+            aFootprint->JumperPadGroups() = aNetlistComponent->JumperPadGroups();
+            msg.Printf( _( "Updated %s jumper pad groups" ), aFootprint->GetReference() );
         }
         else
         {
-            msg.Printf( _( "Update %s jumper pad groups" ), aPcbFootprint->GetReference() );
+            msg.Printf( _( "Update %s jumper pad groups" ), aFootprint->GetReference() );
         }
 
         m_reporter->Report( msg, RPT_SEVERITY_ACTION );
     }
 
     if( changed && copy )
-        m_commit.Modified( aPcbFootprint, copy );
+        m_commit.Modified( aFootprint, copy );
     else
         delete copy;
 
@@ -978,7 +999,7 @@ bool BOARD_NETLIST_UPDATER::updateFootprintGroup( FOOTPRINT* aPcbFootprint,
             if( newGroup == nullptr )
             {
                 newGroup = new PCB_GROUP( m_board );
-                const_cast<KIID&>( newGroup->m_Uuid ) = newGroupKIID;
+                newGroup->SetUuid( newGroupKIID );
                 newGroup->SetName( aNetlistComponent->GetGroup()->name );
 
                 // Add the group to the board manually so we can find it by checking
@@ -1299,6 +1320,7 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
                                                     const std::vector<FOOTPRINT*>& aFootprints,
                                                     const LIB_ID& aBaseFpid )
 {
+    wxString    msg;
     const auto& variants = aComponent->GetVariants();
 
     if( variants.empty() )
@@ -1313,7 +1335,7 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
     {
         wxString                 name;
         const COMPONENT_VARIANT* variant;
-        LIB_ID                   activeFpid;
+        LIB_ID                   variantFPID;
     };
 
     std::vector<VARIANT_INFO> variantInfo;
@@ -1321,7 +1343,7 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
 
     for( const auto& [variantName, variant] : variants )
     {
-        LIB_ID activeFpid = aBaseFpid;
+        LIB_ID variantFPID = aBaseFpid;
 
         auto fieldIt = variant.m_fields.find( footprintFieldName );
 
@@ -1331,7 +1353,6 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
 
             if( parsedId.Parse( fieldIt->second, true ) >= 0 )
             {
-                wxString msg;
                 msg.Printf( _( "Invalid footprint ID '%s' for variant '%s' on %s." ),
                             EscapeHTML( fieldIt->second ),
                             variantName,
@@ -1341,11 +1362,11 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
             }
             else
             {
-                activeFpid = parsedId;
+                variantFPID = parsedId;
             }
         }
 
-        variantInfo.push_back( { variantName, &variant, activeFpid } );
+        variantInfo.push_back( { variantName, &variant, variantFPID } );
     }
 
     for( FOOTPRINT* footprint : aFootprints )
@@ -1363,6 +1384,56 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
 
         bool changed = false;
 
+        auto printAttributeMessage =
+                [&]( bool add, const wxString& attrName, const wxString& variantName )
+                {
+                    if( m_isDryRun )
+                    {
+                        if( aFootprints.size() > 1 )
+                        {
+                            msg.Printf( add ? _( "Add %s '%s' attribute to variant %s (footprint %s)." )
+                                            : _( "Remove %s '%s' attribute from variant %s (footprint %s)." ),
+                                        footprint->GetReference(),
+                                        attrName,
+                                        variantName,
+                                        footprint->GetFPIDAsString() );
+                        }
+                        else
+                        {
+                            msg.Printf( add ? _( "Add %s '%s' attribute to variant %s." )
+                                            : _( "Remove %s '%s' attribute from variant %s." ),
+                                        footprint->GetReference(),
+                                        attrName,
+                                        variantName );
+                        }
+                    }
+                    else
+                    {
+                        if( aFootprints.size() > 1 )
+                        {
+                            msg.Printf( add ? _( "Added %s '%s' attribute to variant %s (footprint %s)." )
+                                            : _( "Removed %s '%s' attribute from variant %s (footprint %s)." ),
+                                        footprint->GetReference(),
+                                        attrName,
+                                        variantName,
+                                        footprint->GetFPIDAsString() );
+                        }
+                        else
+                        {
+                            msg.Printf( add ? _( "Added %s '%s' attribute to variant %s." )
+                                            : _( "Removed %s '%s' attribute from variant %s." ),
+                                        footprint->GetReference(),
+                                        attrName,
+                                        variantName );
+                        }
+                    }
+                };
+
+        std::set<wxString> excessVariants;
+
+        for( const auto& [variantName, _] : footprint->GetVariants() )
+            excessVariants.insert( variantName );
+
         for( const VARIANT_INFO& info : variantInfo )
         {
             const COMPONENT_VARIANT& variant = *info.variant;
@@ -1371,42 +1442,25 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
             const FOOTPRINT_VARIANT* currentVariant = footprint->GetVariant( info.name );
 
             // Check if this footprint is the active one for this variant
-            bool isActiveFootprint = ( footprint->GetFPID() == info.activeFpid );
+            bool isAssociatedFootprint = ( footprint->GetFPID() == info.variantFPID );
 
-            // If this footprint is not active for this variant, it should be DNP.
+            // If this footprint is not active for this variant, it doesn't need variant info for it.
             // Otherwise, apply explicit overrides from schematic, or reset to base footprint value.
-            bool targetDnp;
 
-            if( !isActiveFootprint )
-            {
-                targetDnp = true;
-            }
-            else
-            {
-                targetDnp = variant.m_hasDnp ? variant.m_dnp : footprint->IsDNP();
-            }
+            if( !isAssociatedFootprint )
+                continue;
 
+            excessVariants.erase( info.name );
+            bool targetDnp = variant.m_hasDnp ? variant.m_dnp : footprint->IsDNP();
             bool currentDnp = currentVariant ? currentVariant->GetDNP() : footprint->IsDNP();
 
             if( currentDnp != targetDnp )
             {
-                wxString msg;
+                printAttributeMessage( targetDnp, _( "Do not place" ), info.name );
 
-                if( m_isDryRun )
+                if( !m_isDryRun )
                 {
-                    msg.Printf( targetDnp ? _( "Add %s:%s 'Do not place' variant attribute." )
-                                          : _( "Remove %s:%s 'Do not place' variant attribute." ),
-                                footprint->GetReference(), info.name );
-                }
-                else
-                {
-                    msg.Printf( targetDnp ? _( "Added %s:%s 'Do not place' variant attribute." )
-                                          : _( "Removed %s:%s 'Do not place' variant attribute." ),
-                                footprint->GetReference(), info.name );
-
-                    FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name );
-
-                    if( fpVariant )
+                    if( FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name ) )
                         fpVariant->SetDNP( targetDnp );
                 }
 
@@ -1414,33 +1468,18 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
                 changed = true;
             }
 
-            bool targetExcludedFromBOM = variant.m_hasExcludedFromBOM
-                                                 ? variant.m_excludedFromBOM
-                                                 : footprint->IsExcludedFromBOM();
+            bool targetExcludedFromBOM = variant.m_hasExcludedFromBOM ? variant.m_excludedFromBOM
+                                                                      : footprint->IsExcludedFromBOM();
             bool currentExcludedFromBOM = currentVariant ? currentVariant->GetExcludedFromBOM()
                                                          : footprint->IsExcludedFromBOM();
 
             if( currentExcludedFromBOM != targetExcludedFromBOM )
             {
-                wxString msg;
+                printAttributeMessage( targetExcludedFromBOM, _( "exclude from BOM" ), info.name );
 
-                if( m_isDryRun )
+                if( !m_isDryRun )
                 {
-                    msg.Printf( targetExcludedFromBOM
-                                        ? _( "Add %s:%s 'exclude from BOM' variant attribute." )
-                                        : _( "Remove %s:%s 'exclude from BOM' variant attribute." ),
-                                footprint->GetReference(), info.name );
-                }
-                else
-                {
-                    msg.Printf( targetExcludedFromBOM
-                                        ? _( "Added %s:%s 'exclude from BOM' variant attribute." )
-                                        : _( "Removed %s:%s 'exclude from BOM' variant attribute." ),
-                                footprint->GetReference(), info.name );
-
-                    FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name );
-
-                    if( fpVariant )
+                    if( FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name ) )
                         fpVariant->SetExcludedFromBOM( targetExcludedFromBOM );
                 }
 
@@ -1448,34 +1487,18 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
                 changed = true;
             }
 
-            bool targetExcludedFromPosFiles = variant.m_hasExcludedFromPosFiles
-                                                      ? variant.m_excludedFromPosFiles
-                                                      : footprint->IsExcludedFromPosFiles();
-            bool currentExcludedFromPosFiles = currentVariant
-                                                       ? currentVariant->GetExcludedFromPosFiles()
-                                                       : footprint->IsExcludedFromPosFiles();
+            bool targetExcludedFromPosFiles = variant.m_hasExcludedFromPosFiles ? variant.m_excludedFromPosFiles
+                                                                                : footprint->IsExcludedFromPosFiles();
+            bool currentExcludedFromPosFiles = currentVariant ? currentVariant->GetExcludedFromPosFiles()
+                                                              : footprint->IsExcludedFromPosFiles();
 
             if( currentExcludedFromPosFiles != targetExcludedFromPosFiles )
             {
-                wxString msg;
+                printAttributeMessage( targetExcludedFromPosFiles, _( "exclude from position files" ), info.name );
 
-                if( m_isDryRun )
+                if( !m_isDryRun )
                 {
-                    msg.Printf( targetExcludedFromPosFiles
-                                        ? _( "Add %s:%s 'exclude from position files' variant attribute." )
-                                        : _( "Remove %s:%s 'exclude from position files' variant attribute." ),
-                                footprint->GetReference(), info.name );
-                }
-                else
-                {
-                    msg.Printf( targetExcludedFromPosFiles
-                                        ? _( "Added %s:%s 'exclude from position files' variant attribute." )
-                                        : _( "Removed %s:%s 'exclude from position files' variant attribute." ),
-                                footprint->GetReference(), info.name );
-
-                    FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name );
-
-                    if( fpVariant )
+                    if( FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name ) )
                         fpVariant->SetExcludedFromPosFiles( targetExcludedFromPosFiles );
                 }
 
@@ -1489,26 +1512,51 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
                     continue;
 
                 bool hasCurrentValue = currentVariant && currentVariant->HasFieldValue( fieldName );
-                wxString currentValue = hasCurrentValue ? currentVariant->GetFieldValue( fieldName )
-                                                        : wxString();
+                wxString currentValue = hasCurrentValue ? currentVariant->GetFieldValue( fieldName ) : wxString();
 
                 if( currentValue != fieldValue )
                 {
-                    wxString msg;
-
                     if( m_isDryRun )
                     {
-                        msg.Printf( _( "Change %s:%s field '%s' to '%s'." ),
-                                    footprint->GetReference(), info.name, fieldName, fieldValue );
+                        if( aFootprints.size() > 1 )
+                        {
+                            msg.Printf( _( "Change %s field '%s' to '%s' on variant %s (footprint %s)." ),
+                                        footprint->GetReference(),
+                                        fieldName,
+                                        fieldValue,
+                                        info.name,
+                                        footprint->GetFPIDAsString() );
+                        }
+                        else
+                        {
+                            msg.Printf( _( "Change %s field '%s' to '%s' on variant %s." ),
+                                        footprint->GetReference(),
+                                        fieldName,
+                                        fieldValue,
+                                        info.name );
+                        }
                     }
                     else
                     {
-                        msg.Printf( _( "Changed %s:%s field '%s' to '%s'." ),
-                                    footprint->GetReference(), info.name, fieldName, fieldValue );
+                        if( aFootprints.size() > 1 )
+                        {
+                            msg.Printf( _( "Changed %s field '%s' to '%s' on variant %s (footprint %s)." ),
+                                        footprint->GetReference(),
+                                        fieldName,
+                                        fieldValue,
+                                        info.name,
+                                        footprint->GetFPIDAsString() );
+                        }
+                        else
+                        {
+                            msg.Printf( _( "Changed %s field '%s' to '%s' on variant %s." ),
+                                        footprint->GetReference(),
+                                        fieldName,
+                                        fieldValue,
+                                        info.name );
+                        }
 
-                        FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name );
-
-                        if( fpVariant )
+                        if( FOOTPRINT_VARIANT* fpVariant = footprint->AddVariant( info.name ) )
                             fpVariant->SetFieldValue( fieldName, fieldValue );
                     }
 
@@ -1518,13 +1566,35 @@ void BOARD_NETLIST_UPDATER::applyComponentVariants( COMPONENT* aComponent,
             }
         }
 
+        for( const wxString& excess : excessVariants )
+        {
+            if( m_isDryRun )
+            {
+                msg.Printf( _( "Remove variant %s:%s no longer associated with footprint %s." ),
+                            footprint->GetReference(),
+                            excess,
+                            footprint->GetFPIDAsString() );
+            }
+            else
+            {
+                msg.Printf( _( "Removed variant %s:%s no longer associated with footprint %s." ),
+                            footprint->GetReference(),
+                            excess,
+                            footprint->GetFPIDAsString() );
+
+                footprint->DeleteVariant( excess );
+            }
+
+            m_reporter->Report( msg, RPT_SEVERITY_ACTION );
+            changed = true;
+        }
+
         // For the default variant: if this footprint is not the base footprint
         // it should be DNP by default
         bool isBaseFootprint = ( footprint->GetFPID() == aBaseFpid );
 
         if( !isBaseFootprint && !footprint->IsDNP() )
         {
-            wxString msg;
             msg.Printf( m_isDryRun ? _( "Add %s 'Do not place' fabrication attribute." )
                                    : _( "Added %s 'Do not place' fabrication attribute." ),
                         footprint->GetReference() );

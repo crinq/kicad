@@ -65,7 +65,8 @@ PCB_PLOTTER::PCB_PLOTTER( BOARD* aBoard, REPORTER* aReporter, PCB_PLOT_PARAMS& a
 bool PCB_PLOTTER::Plot( const wxString& aOutputPath, const LSEQ& aLayersToPlot,
                         const LSEQ& aCommonLayers, bool aUseGerberFileExtensions,
                         bool aOutputPathIsSingle, std::optional<wxString> aLayerName,
-                        std::optional<wxString> aSheetName, std::optional<wxString> aSheetPath )
+                        std::optional<wxString> aSheetName, std::optional<wxString> aSheetPath,
+                        std::vector<wxString>* aOutputFiles )
 {
     std::function<bool( wxString* )> textResolver = [&]( wxString* token ) -> bool
     {
@@ -85,7 +86,7 @@ bool PCB_PLOTTER::Plot( const wxString& aOutputPath, const LSEQ& aLayersToPlot,
 
     if( m_plotOpts.GetFormat() == PLOT_FORMAT::SVG && m_plotOpts.GetSvgFitPagetoBoard() ) // Page is board boundary size
     {
-        BOX2I     bbox = m_board->ComputeBoundingBox( false );
+        BOX2I     bbox = m_board->ComputeBoundingBox( false, false );
         PAGE_INFO currPageInfo = m_board->GetPageSettings();
 
         currPageInfo.SetWidthMils( bbox.GetWidth() / pcbIUScale.IU_PER_MILS );
@@ -287,6 +288,9 @@ bool PCB_PLOTTER::Plot( const wxString& aOutputPath, const LSEQ& aLayersToPlot,
 
                 msg.Printf( _( "Plotted to '%s'." ), fn.GetFullPath() );
                 m_reporter->Report( msg, RPT_SEVERITY_ACTION );
+
+                if( aOutputFiles )
+                    aOutputFiles->push_back( fn.GetFullPath() );
             }
         }
         else
@@ -310,6 +314,9 @@ bool PCB_PLOTTER::Plot( const wxString& aOutputPath, const LSEQ& aLayersToPlot,
         // Build gerber job file from basename
         BuildPlotFileName( &fn, aOutputPath, wxT( "job" ), FILEEXT::GerberJobFileExtension );
         jobfile_writer->CreateJobFile( fn.GetFullPath() );
+
+        if( aOutputFiles )
+            aOutputFiles->push_back( fn.GetFullPath() );
     }
 
     m_reporter->ReportTail( _( "Done." ), RPT_SEVERITY_INFO );

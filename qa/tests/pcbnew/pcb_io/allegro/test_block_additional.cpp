@@ -91,6 +91,61 @@ static void TestOlympus0x20( const BLOCK_BASE& aBlock )
 
 
 /**
+ * This is a 1-layer SMD padstack in v16.3 format.
+ */
+static void TestParallellaV163_PS_56X55RT( const BLOCK_BASE& aBlock )
+{
+    BOOST_REQUIRE( aBlock.GetBlockType() == 0x1c );
+
+    // Just test that the block is parsed and has the expected key, the rest of the data is mostly unknown and not worth testing
+    const auto& blk = static_cast<const BLOCK<BLK_0x1C_PADSTACK>&>( aBlock ).GetData();
+
+    BOOST_TEST( blk.m_Key == 0x0acda700 );
+
+    BOOST_TEST( blk.m_LayerCount == 1 );
+    BOOST_TEST( blk.m_Components.size() == 10 + 3 * 1);
+}
+
+
+static void TestBeagleBoneAI_PS_200C125D( const BLOCK_BASE& aBlock )
+{
+    BOOST_REQUIRE( aBlock.GetBlockType() == 0x1c );
+
+    // Just test that the block is parsed and has the expected key, the rest of the data is mostly unknown and not worth testing
+    const auto& blk = static_cast<const BLOCK<BLK_0x1C_PADSTACK>&>( aBlock ).GetData();
+
+    BOOST_TEST( blk.m_Key == 0x1fda );
+    BOOST_TEST( blk.m_LayerCount == 12 );
+
+    BOOST_TEST( blk.m_Components.size() == 21 + 4 * 12 );
+
+    BOOST_TEST( blk.m_Components[0].m_Type == PADSTACK_COMPONENT::TYPE_RECTANGLE );
+    BOOST_TEST( blk.m_Components[0].m_W == 244000 );
+    BOOST_TEST( blk.m_Components[0].m_H == 244000 );
+}
+
+
+static void TestCutiePiV166_PS_C50H340M700N( const BLOCK_BASE& aBlock )
+{
+    BOOST_REQUIRE( aBlock.GetBlockType() == 0x1c );
+
+    // Just test that the block is parsed and has the expected key, the rest of the data is mostly unknown and not worth testing
+    const auto& blk = static_cast<const BLOCK<BLK_0x1C_PADSTACK>&>( aBlock ).GetData();
+
+    BOOST_TEST( blk.m_Key == 0x0bfa9588 );
+
+    BOOST_TEST( blk.m_LayerCount == 6 );
+    BOOST_TEST( blk.m_Drill == 133858 );
+
+    BOOST_TEST( blk.m_Components.size() == 11 + 3 * 6 );
+
+    BOOST_TEST( blk.m_Components[0].m_Type == PADSTACK_COMPONENT::TYPE_CIRCLE );
+    BOOST_TEST( blk.m_Components[0].m_W == 275591 );
+    BOOST_TEST( blk.m_Components[0].m_H == 275591 );
+}
+
+
+/**
  * The registry of additional block tests, keyed by board name and block offset.
  *
  * The test function takes the parsed block as an argument, and can perform any additional
@@ -101,13 +156,16 @@ static void TestOlympus0x20( const BLOCK_BASE& aBlock )
 // clang-format off
 static const std::unordered_map<BLOCK_TEST_KEY, BLOCK_TEST_FUNC> additionalBlockTests{
     { { "Olympus_15061-1b_v165",      0x0131553c }, TestOlympus0x20 },
+    { { "BeagleBone-AI",              0x00047f44 }, TestBeagleBoneAI_PS_200C125D },
+    { { "CutiePi_V2_3_v166",          0x0001ef8c }, TestCutiePiV166_PS_C50H340M700N },
+    { { "parallella_v163",            0x000368c8 }, TestParallellaV163_PS_56X55RT },
 };
 
 
 static const std::unordered_map<BLOCK_TEST_KEY, DB_OBJ_TEST_FUNC> additionalDbObjTests{
     { { "Olympus_15061-1b_v165",      0x0131553c }, []( const DB_OBJ& obj )
         {
-            BOOST_REQUIRE( obj.GetType() == DB_OBJ::TYPE::x20 );
+            BOOST_REQUIRE( obj.GetType() == BRD_x20 );
 
             const auto& blk = static_cast<const UNKNOWN_0x20&>( obj );
             BOOST_TEST( blk.m_Next.m_TargetKey == 0x824DF8F0 );
@@ -132,7 +190,7 @@ void KI_TEST::RunAdditionalBlockTest( const std::string& aBoardName, size_t aBlo
     }
     else
     {
-        BOOST_TEST_MESSAGE( "No additional test defined for this block" );
+        BOOST_TEST_FAIL( "No additional test defined for this block" );
     }
 }
 
@@ -151,6 +209,6 @@ void KI_TEST::RunAdditionalObjectTest( const std::string& aBoardName, size_t aBl
     }
     else
     {
-        BOOST_TEST_MESSAGE( "No additional test defined for this DB_OBJ" );
+        BOOST_TEST_FAIL( "No additional test defined for this DB_OBJ" );
     }
 }

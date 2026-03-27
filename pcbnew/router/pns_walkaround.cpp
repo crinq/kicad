@@ -20,9 +20,10 @@
  */
 
 #include <chrono>
-#include <advanced_config.h>
 #include <optional>
 
+#include <advanced_config.h>
+#include <core/typeinfo.h>
 #include <geometry/shape_line_chain.h>
 
 #include "pns_walkaround.h"
@@ -62,7 +63,7 @@ NODE::OPT_OBSTACLE WALKAROUND::nearestObstacle( const LINE& aPath )
         };
     }
 
-    opts.m_useClearanceEpsilon = false;
+    opts.m_useClearanceEpsilon = true;
     return m_world->NearestObstacle( &aPath, opts );
 }
 
@@ -88,17 +89,6 @@ void WALKAROUND::RestrictToCluster( bool aEnabled, const TOPOLOGY::CLUSTER& aClu
         if( SOLID* solid = dyn_cast<SOLID*>( item ) )
             m_restrictedVertices.push_back( solid->Anchor( 0 ) );
     }
-}
-
-static wxString policy2string ( WALKAROUND::WALK_POLICY policy )
-{
-    switch(policy)
-    {
-        case WALKAROUND::WP_CCW: return wxT("ccw");
-        case WALKAROUND::WP_CW: return wxT("cw");
-        case WALKAROUND::WP_SHORTEST: return wxT("shortest");
-    }
-    return wxT("?");
 }
 
 bool WALKAROUND::singleStep()
@@ -184,6 +174,8 @@ bool WALKAROUND::singleStep()
 
             LINE tmp( aLine );
 
+            aLine.Line().Simplify2();
+
             bool stat = aLine.Walkaround( hull, tmp.Line(), aCw );
 
             PNS_DBG( Dbg(), AddShape, &hull, YELLOW, 10000, wxString::Format( "hull stat %d", stat?1:0 ) );
@@ -242,7 +234,7 @@ bool WALKAROUND::singleStep()
 
         if( st_cw && st_ccw )
         {
-            if( !cw_coll && !ccw_coll || ( cw_coll && ccw_coll) )
+            if( ( !cw_coll && !ccw_coll ) || ( cw_coll && ccw_coll ) )
             {
                 if( path_cw.CLine().Length() > path_ccw.CLine().Length() )
                 {
@@ -268,18 +260,22 @@ bool WALKAROUND::singleStep()
 
         bool anyColliding = false;
 
-        if( m_lastShortestCluster && shortest.has_value() )
+        if( shortest.has_value() )
         {
-            for( auto& item : m_lastShortestCluster->m_items )
+            PNS_DBG( Dbg(), AddItem, &shortest.value(), RED, 10000, wxString::Format( "shortest-l" ) );
+
+            for( auto& item : m_processedItems )
             {
-                if( shortest->Collide( item, m_world, shortest->Layer() ) )
+                std::set<PNS::OBSTACLE> obstacles;
+                PNS::COLLISION_SEARCH_CONTEXT ctx( obstacles );
+                if( shortest->Collide( item, m_world, shortest->Layer(), &ctx ) )
                 {
                     anyColliding = true;
                     break;
                 }
             }
 
-            PNS_DBG( Dbg(), Message, wxString::Format("check-back cc %d items %d coll %d", (int) pendingClusters[ WP_SHORTEST ].m_items.size(), (int) m_lastShortestCluster->m_items.size(), anyColliding ? 1: 0 ) );
+            PNS_DBG( Dbg(), Message, wxString::Format("check-back cc %d items %d coll %d", (int) pendingClusters[ WP_SHORTEST ].m_items.size(), (int) m_processedItems.size(), anyColliding ? 1: 0 ) );
         }
 
         if ( anyColliding )
@@ -296,7 +292,8 @@ bool WALKAROUND::singleStep()
             m_currentResult.lines[WP_SHORTEST] = *shortest;
         }
 
-        m_lastShortestCluster = pendingClusters[ WP_SHORTEST ];
+        for( auto item : pendingClusters[ WP_SHORTEST ].m_items )
+            m_processedItems.insert( item );
     }
 
     return ST_IN_PROGRESS;
@@ -326,6 +323,8 @@ const WALKAROUND::RESULT WALKAROUND::Route( const LINE& aInitialPath )
 #endif
 
     start( aInitialPath );
+
+    m_processedItems.clear();
 
     PNS_DBG( Dbg(), AddItem, &aInitialPath, WHITE, 10000, wxT( "initial-path" ) );
 
@@ -404,4 +403,3 @@ void WALKAROUND::SetAllowedPolicies( std::vector<WALK_POLICY> aPolicies)
 }
 
 }
-

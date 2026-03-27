@@ -41,10 +41,12 @@ using namespace std::placeholders;
 #include <pad.h>
 #include <zone.h>
 #include <pcb_edit_frame.h>
+#include <pcb_track.h>
 #include <pcbnew_id.h>
 #include <dialogs/dialog_pns_settings.h>
 #include <dialogs/dialog_pns_diff_pair_dimensions.h>
 #include <dialogs/dialog_track_via_size.h>
+#include <dialogs/dialog_router_save_test_case.h>
 #include <math/vector2wx.h>
 #include <paths.h>
 #include <confirm.h>
@@ -73,6 +75,8 @@ using namespace std::placeholders;
 #include <project/project_file.h>
 #include <project/project_local_settings.h>
 
+#include <io/io_utils.h>
+
 #include "router_tool.h"
 #include "router_status_view_item.h"
 #include "pns_router.h"
@@ -88,6 +92,31 @@ using namespace std::placeholders;
 #include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
 
 using namespace KIGFX;
+
+namespace
+{
+
+// Saves and restores the global wxUpdateUIEvent interval so it cannot leak on
+// early returns or exceptions.
+class UI_UPDATE_INTERVAL_GUARD
+{
+public:
+    UI_UPDATE_INTERVAL_GUARD( long aNewInterval ) :
+            m_saved( wxUpdateUIEvent::GetUpdateInterval() )
+    {
+        wxUpdateUIEvent::SetUpdateInterval( aNewInterval );
+    }
+
+    ~UI_UPDATE_INTERVAL_GUARD()
+    {
+        wxUpdateUIEvent::SetUpdateInterval( m_saved );
+    }
+
+private:
+    long m_saved;
+};
+
+} // anonymous namespace
 
 /**
  * Flags used by via tool actions
@@ -303,7 +332,7 @@ protected:
 
             int menuIdx = ID_POPUP_PCB_SELECT_WIDTH1 + i;
             Append( menuIdx, msg, wxEmptyString, wxITEM_CHECK );
-            Check( menuIdx, useIndex && bds.GetTrackWidthIndex() == i );
+            Check( menuIdx, useIndex && bds.GetTrackWidthIndex() == (int) i );
         }
 
         AppendSeparator();
@@ -331,7 +360,7 @@ protected:
 
             int menuIdx = ID_POPUP_PCB_SELECT_VIASIZE1 + i;
             Append( menuIdx, msg, wxEmptyString, wxITEM_CHECK );
-            Check( menuIdx, useIndex && bds.GetViaSizeIndex() == i );
+            Check( menuIdx, useIndex && bds.GetViaSizeIndex() == (int) i );
         }
     }
 
@@ -457,7 +486,7 @@ protected:
 
             int menuIdx = ID_POPUP_PCB_SELECT_DIFFPAIR1 + i - 1;
             Append( menuIdx, msg, wxEmptyString, wxITEM_CHECK );
-            Check( menuIdx, !bds.UseCustomDiffPairDimensions() && bds.GetDiffPairIndex() == i );
+            Check( menuIdx, !bds.UseCustomDiffPairDimensions() && bds.GetDiffPairIndex() == (int) i );
         }
     }
 
@@ -663,8 +692,11 @@ void ROUTER_TOOL::Reset( RESET_REASON aReason )
 
 void ROUTER_TOOL::saveRouterDebugLog()
 {
-    static wxString mruPath = PATHS::GetDefaultUserProjectsPath();
+    wxString testCaseDir = ADVANCED_CFG::GetCfg().m_RouterTestCaseDirectory;
+    wxString logPath;
     static size_t   lastLoggerSize = 0;
+    static wxString mruPath;
+    PNS::LOGGER::LOG_DATA logData;
 
     auto logger = m_router->Logger();
 
@@ -673,6 +705,47 @@ void ROUTER_TOOL::saveRouterDebugLog()
     {
         return;
     }
+
+    if( !testCaseDir.IsEmpty() )
+    {
+        DIALOG_ROUTER_SAVE_TEST_CASE saveDlg( frame(), testCaseDir );
+        bool doExit = false;
+
+        if( saveDlg.ShowModal() == wxID_OK )
+        {
+            wxFileName path( testCaseDir );
+            path.AppendDir( saveDlg.getTestCaseName() );
+            logData.m_TestCaseType = saveDlg.getTestCaseType();
+
+            if( path.DirExists() )
+            {
+                doExit = !IsOK( frame(), wxString::Format( _("Test case in directory %s already exists. Overwrite?"), path.GetFullPath() ) );
+            }
+            else
+            {
+                wxMkdir( path.GetFullPath() );
+            }
+
+            path.SetName( wxT("pns") );
+            logPath = path.GetFullPath();
+        }
+        else
+        {
+            doExit = true;
+        }
+
+        if( doExit )
+        {
+            lastLoggerSize = logger->GetEvents().size(); // prevent re-entry
+            return;
+        }        
+    }
+    else
+    {
+        if ( mruPath.IsEmpty() )
+        {
+            mruPath = PATHS::GetDefaultUserProjectsPath();
+        }
 
     wxFileDialog dlg( frame(), _( "Save router log" ), mruPath, "pns.log",
                       "PNS log files" + AddFileExtListToFilter( { "log" } ),
@@ -686,8 +759,14 @@ void ROUTER_TOOL::saveRouterDebugLog()
         return;
     }
 
-    wxFileName fname_log( dlg.GetPath() );
+        logPath = dlg.GetPath();
+    }
+
+
+    wxFileName fname_log( logPath );
     mruPath = fname_log.GetPath();
+    fname_log.SetExt( "log" );
+    printf("save log to: %s\n", fname_log.GetFullPath().c_str().AsChar() );
 
     wxFileName fname_dump( fname_log );
     fname_dump.SetExt( "dump" );
@@ -712,23 +791,28 @@ void ROUTER_TOOL::saveRouterDebugLog()
     prj->GetLocalSettings().SaveAs( fname_dump.GetPath(), fname_dump.GetName() );
 
     // Build log file:
-    std::vector<PNS::ITEM*> added, removed, heads;
-    m_router->GetUpdatedItems( removed, added, heads );
+    std::vector<PNS::ITEM*> removed;
+    m_router->GetUpdatedItems( removed, logData.m_AddedItems, logData.m_Heads );
 
-    std::set<KIID> removedKIIDs;
 
     for( auto item : removed )
     {
         wxASSERT_MSG( item->Parent() != nullptr, "removed an item with no parent uuid?" );
 
         if( item->Parent() )
-            removedKIIDs.insert( item->Parent()->m_Uuid );
+            logData.m_RemovedItems.insert( item->Parent()->m_Uuid );
     }
 
+    logData.m_BoardHash = IO_UTILS::fileHashMMH3( fname_dump.GetAbsolutePath() );
+
+    if( !logData.m_BoardHash ) // should never happen...
+        return;
+
+    logData.m_Mode = m_router->Mode();    
+    logData.m_Events = logger->GetEvents();
+
     FILE*    log_f = wxFopen( fname_log.GetAbsolutePath(), "wb" );
-    wxString logString = PNS::LOGGER::FormatLogFileAsString( m_router->Mode(),
-                                                             added, removedKIIDs, heads,
-                                                             logger->GetEvents() );
+    wxString logString = PNS::LOGGER::FormatLogFileAsJSON( logData );
 
     if( !log_f )
     {
@@ -1046,7 +1130,6 @@ int ROUTER_TOOL::handleLayerSwitch( const TOOL_EVENT& aEvent, bool aForceVia )
     {
         size_t idx = 0;
         size_t target_idx = 0;
-        PCB_LAYER_ID lastTargetLayer = m_lastTargetLayer;
 
         for( size_t i = 0; i < layers.size(); i++ )
         {
@@ -1148,8 +1231,7 @@ int ROUTER_TOOL::handleLayerSwitch( const TOOL_EVENT& aEvent, bool aForceVia )
         }
     }
 
-    BOARD_DESIGN_SETTINGS& bds        = board()->GetDesignSettings();
-    const int              layerCount = bds.GetCopperLayerCount();
+    BOARD_DESIGN_SETTINGS& bds = board()->GetDesignSettings();
 
     PCB_LAYER_ID pairTop    = frame()->GetScreen()->m_Route_Layer_TOP;
     PCB_LAYER_ID pairBottom = frame()->GetScreen()->m_Route_Layer_BOTTOM;
@@ -1465,6 +1547,10 @@ void ROUTER_TOOL::performRouting( VECTOR2D aStartPosition )
         handleLayerSwitch( ACT_PlaceThroughVia.MakeEvent(), true );
     }
 
+    // Throttle wxEVT_UPDATE_UI during routing. The idle sweep fires between every Wait()
+    // iteration and its cost dominates at interactive frame rates.
+    UI_UPDATE_INTERVAL_GUARD uiGuard( 200 );
+
     while( TOOL_EVENT* evt = Wait() )
     {
         setCursor();
@@ -1556,7 +1642,6 @@ void ROUTER_TOOL::performRouting( VECTOR2D aStartPosition )
         {
             updateEndItem( *evt );
             bool needLayerSwitch = m_router->IsPlacingVia();
-            bool forceFinish = evt->Modifier( MD_SHIFT );
             bool forceCommit = false;
 
             if( m_router->FixRoute( m_endSnapPoint, m_endItem, false, forceCommit ) )
@@ -1830,7 +1915,6 @@ int ROUTER_TOOL::RouteSelected( const TOOL_EVENT& aEvent )
             if( frame->GetActiveLayer() != originalLayer )
                 frame->SetActiveLayer( originalLayer );
 
-            VECTOR2I ignore;
             m_startItem = m_router->GetWorld()->FindItemByParent( anchor->Parent() );
             m_startSnapPoint = anchor->Pos();
             m_router->SetMode( mode );
@@ -2073,6 +2157,8 @@ void ROUTER_TOOL::performDragging( int aMode )
     m_gridHelper->SetAuxAxes( true, m_startSnapPoint );
     frame()->UndoRedoBlock( true );
 
+    UI_UPDATE_INTERVAL_GUARD uiGuard( 200 );
+
     while( TOOL_EVENT* evt = Wait() )
     {
         ctls->ForceCursorPosition( false );
@@ -2265,12 +2351,12 @@ bool ROUTER_TOOL::CanInlineDrag( int aDragMode )
     {
         return selection.Front()->IsType( GENERAL_COLLECTOR::DraggableItems );
     }
-    else if( selection.CountType( PCB_FOOTPRINT_T ) == selection.Size() )
+    else if( selection.CountType( PCB_FOOTPRINT_T ) == (size_t) selection.Size() )
     {
         // Footprints cannot be dragged freely.
         return !( aDragMode & PNS::DM_FREE_ANGLE );
     }
-    else if( selection.CountType( PCB_TRACE_T ) == selection.Size() )
+    else if( selection.CountType( PCB_TRACE_T ) == (size_t) selection.Size() )
     {
         return true;
     }
@@ -2351,7 +2437,6 @@ int ROUTER_TOOL::InlineDrag( const TOOL_EVENT& aEvent )
 
     m_startItem = nullptr;
 
-    PNS::ITEM*    startItem = nullptr;
     PNS::ITEM_SET itemsToDrag;
 
     bool showCourtyardConflicts = frame()->GetPcbNewSettings()->m_ShowCourtyardCollisions;
@@ -2544,6 +2629,8 @@ int ROUTER_TOOL::InlineDrag( const TOOL_EVENT& aEvent )
 
     // Send an initial movement to prime the collision detection
     m_router->Move( p, nullptr );
+
+    UI_UPDATE_INTERVAL_GUARD uiGuard( 200 );
 
     bool hasMouseMoved = false;
     bool hasMultidragCancelled = false;

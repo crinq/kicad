@@ -402,35 +402,21 @@ void PCB_PROPERTIES_PANEL::rebuildProperties( const SELECTION& aSelection )
     // Make sure value comes immediately after reference.  (Reference is invariant, so was added by
     // FOOTPRINT_DESC().  We *could* still add it here, but then the whole Fields section comes at
     // the end, which isn't ideal.)
-    m_propMgr.AddProperty( new PCB_FOOTPRINT_FIELD_PROPERTY( _HKI( "Value" ) ), groupFields );
+    if( !m_propMgr.GetProperty( TYPE_HASH( FOOTPRINT ), _HKI( "Value" ) ) )
+        m_propMgr.AddProperty( new PCB_FOOTPRINT_FIELD_PROPERTY( _HKI( "Value" ) ), groupFields );
 
     for( const wxString& name : m_currentFieldNames )
     {
         if( !m_propMgr.GetProperty( TYPE_HASH( FOOTPRINT ), name ) )
         {
             m_propMgr.AddProperty( new PCB_FOOTPRINT_FIELD_PROPERTY( name ), groupFields )
-                    .SetAvailableFunc( [name]( INSPECTABLE* )
-                                       {
-                                           return PCB_PROPERTIES_PANEL::m_currentFieldNames.count( name );
-                                       } );
+                    .SetAvailableFunc(
+                            [name]( INSPECTABLE* )
+                            {
+                                return PCB_PROPERTIES_PANEL::m_currentFieldNames.count( name );
+                            } );
         }
     }
-
-    m_propMgr.AddProperty( new PROPERTY<FOOTPRINT, wxString>( _HKI( "Library Link" ),
-                NO_SETTER( FOOTPRINT, wxString ), &FOOTPRINT::GetFPIDAsString ),
-                groupFields );
-    m_propMgr.AddProperty( new PROPERTY<FOOTPRINT, wxString>( _HKI( "Library Description" ),
-                NO_SETTER( FOOTPRINT, wxString ), &FOOTPRINT::GetLibDescription ),
-                groupFields );
-    m_propMgr.AddProperty( new PROPERTY<FOOTPRINT, wxString>( _HKI( "Keywords" ),
-                NO_SETTER( FOOTPRINT, wxString ), &FOOTPRINT::GetKeywords ),
-                groupFields );
-
-    // Note: Also used by DRC engine
-    m_propMgr.AddProperty( new PROPERTY<FOOTPRINT, wxString>( _HKI( "Component Class" ),
-                NO_SETTER( FOOTPRINT, wxString ), &FOOTPRINT::GetComponentClassAsString ),
-                groupFields )
-            .SetIsHiddenFromLibraryEditors();
 
     PROPERTIES_PANEL::rebuildProperties( aSelection );
 }
@@ -702,31 +688,27 @@ bool PCB_PROPERTIES_PANEL::getItemValue( EDA_ITEM* aItem, PROPERTY_BASE* aProper
     // For FOOTPRINT variant-aware boolean properties, return variant-specific values
     if( aItem->Type() == PCB_FOOTPRINT_T )
     {
-        FOOTPRINT* footprint = static_cast<FOOTPRINT*>( aItem );
-        wxString   variantName;
+        FOOTPRINT*      footprint = static_cast<FOOTPRINT*>( aItem );
+        const wxString& propName = aProperty->Name();
+        wxString        variantName;
 
         if( footprint->GetBoard() )
             variantName = footprint->GetBoard()->GetCurrentVariant();
 
-        if( !variantName.IsEmpty() )
+        if( propName == _HKI( "Do not Populate" ) )
         {
-            wxString propName = aProperty->Name();
-
-            if( propName == _HKI( "Do not Populate" ) )
-            {
-                aValue = wxVariant( footprint->GetDNPForVariant( variantName ) );
-                return true;
-            }
-            else if( propName == _HKI( "Exclude From Bill of Materials" ) )
-            {
-                aValue = wxVariant( footprint->GetExcludedFromBOMForVariant( variantName ) );
-                return true;
-            }
-            else if( propName == _HKI( "Exclude From Position Files" ) )
-            {
-                aValue = wxVariant( footprint->GetExcludedFromPosFilesForVariant( variantName ) );
-                return true;
-            }
+            aValue = wxVariant( footprint->GetDNPForVariant( variantName ) );
+            return true;
+        }
+        else if( propName == _HKI( "Exclude From Bill of Materials" ) )
+        {
+            aValue = wxVariant( footprint->GetExcludedFromBOMForVariant( variantName ) );
+            return true;
+        }
+        else if( propName == _HKI( "Exclude From Position Files" ) )
+        {
+            aValue = wxVariant( footprint->GetExcludedFromPosFilesForVariant( variantName ) );
+            return true;
         }
     }
 

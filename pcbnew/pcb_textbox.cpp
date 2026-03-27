@@ -124,7 +124,7 @@ bool PCB_TEXTBOX::Deserialize( const google::protobuf::Any& aContainer )
     if( !aContainer.UnpackTo( &boardText ) )
         return false;
 
-    const_cast<KIID&>( m_Uuid ) = KIID( boardText.id().value() );
+    SetUuidDirect( KIID( boardText.id().value() ) );
     SetLayer( FromProtoEnum<PCB_LAYER_ID, types::BoardLayer>( boardText.layer() ) );
     SetLocked( boardText.locked() == kiapi::common::types::LockedState::LS_LOCKED );
 
@@ -743,7 +743,7 @@ void PCB_TEXTBOX::TransformShapeToPolygon( SHAPE_POLY_SET& aBuffer, PCB_LAYER_ID
     {
         aBuffer.NewOutline();
 
-        const SHAPE_LINE_CHAIN& poly = m_poly.Outline( 0 );
+        const SHAPE_LINE_CHAIN& poly = GetPolyShape().Outline( 0 );
 
         for( int ii = 0; ii < poly.PointCount(); ++ii )
             aBuffer.Append( poly.GetPoint( ii ) );

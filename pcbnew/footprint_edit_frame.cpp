@@ -34,8 +34,6 @@
 #include "tools/align_distribute_tool.h"
 #include "tools/pcb_point_editor.h"
 #include "tools/pcb_selection_tool.h"
-#include <python/scripting/pcb_scripting_tool.h>
-#include <3d_viewer/eda_3d_viewer_frame.h>
 #include <bitmaps.h>
 #include <board.h>
 #include <project/net_settings.h>
@@ -55,6 +53,7 @@
 #include <pgm_base.h>
 #include <project.h>
 #include <project_pcb.h>
+#include <string_utils.h>
 #include <settings/settings_manager.h>
 #include <tool/action_toolbar.h>
 #include <tool/common_control.h>
@@ -1239,7 +1238,6 @@ void FOOTPRINT_EDIT_FRAME::setupTools()
     m_toolManager->RegisterTool( new PCB_VIEWER_TOOLS );
     m_toolManager->RegisterTool( new PCB_GROUP_TOOL );
     m_toolManager->RegisterTool( new CONVERT_TOOL );
-    m_toolManager->RegisterTool( new SCRIPTING_TOOL );
     m_toolManager->RegisterTool( new PROPERTIES_TOOL );
     m_toolManager->RegisterTool( new EMBED_TOOL );
 
@@ -1377,6 +1375,8 @@ void FOOTPRINT_EDIT_FRAME::setupUIConditions()
 
     mgr->SetConditions( ACTIONS::zoomTool,               CHECK( cond.CurrentTool( ACTIONS::zoomTool ) ) );
     mgr->SetConditions( ACTIONS::selectionTool,          CHECK( cond.CurrentTool( ACTIONS::selectionTool ) ) );
+    mgr->SetConditions( ACTIONS::selectSetRect,          CHECK( cond.CurrentTool( ACTIONS::selectionTool ) ) );
+    mgr->SetConditions( ACTIONS::selectSetLasso,         CHECK( cond.CurrentTool( ACTIONS::selectionTool ) ) );
     // clang-format on
 
     auto highContrastCond =
@@ -1385,11 +1385,10 @@ void FOOTPRINT_EDIT_FRAME::setupUIConditions()
                 return GetDisplayOptions().m_ContrastModeDisplay != HIGH_CONTRAST_MODE::NORMAL;
             };
 
-    auto boardFlippedCond =
-            [this]( const SELECTION& )
-            {
-                return GetCanvas() && GetCanvas()->GetView()->IsMirroredX();
-            };
+    auto boardFlippedCond = [this]( const SELECTION& )
+    {
+        return GetDisplayOptions().m_FlipBoardView;
+    };
 
     auto libraryTreeCond =
             [this](const SELECTION& )

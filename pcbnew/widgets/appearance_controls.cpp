@@ -528,7 +528,7 @@ APPEARANCE_CONTROLS::APPEARANCE_CONTROLS( PCB_BASE_FRAME* aParent, wxWindow* aFo
                 passOnFocus();
             } );
 
-    m_cbFlipBoard->SetValue( m_frame->GetCanvas()->GetView()->IsMirroredX() );
+    m_cbFlipBoard->SetValue( m_frame->GetDisplayOptions().m_FlipBoardView );
     m_cbFlipBoard->Bind( wxEVT_CHECKBOX,
             [&]( wxCommandEvent& aEvent )
             {
@@ -1442,7 +1442,7 @@ void APPEARANCE_CONTROLS::UpdateDisplayOptions()
     case NET_COLOR_MODE::OFF:      m_rbNetColorOff->SetValue( true );      break;
     }
 
-    m_cbFlipBoard->SetValue( m_frame->GetCanvas()->GetView()->IsMirroredX() );
+    m_cbFlipBoard->SetValue( m_frame->GetDisplayOptions().m_FlipBoardView );
 
     if( !m_isFpEditor )
     {
@@ -2244,7 +2244,9 @@ void APPEARANCE_CONTROLS::rebuildObjects()
     auto appendObject =
             [&]( const std::unique_ptr<APPEARANCE_SETTING>& aSetting )
             {
+                wxPanel*    panel = new wxPanel( m_windowObjects, wxID_ANY );
                 wxBoxSizer* sizer = new wxBoxSizer( wxHORIZONTAL );
+                panel->SetSizer( sizer );
                 int         layer = aSetting->id;
 
                 aSetting->visible = visible.Contains( ToGalLayer( layer ) );
@@ -2253,7 +2255,7 @@ void APPEARANCE_CONTROLS::rebuildObjects()
 
                 if( color != COLOR4D::UNSPECIFIED || defColor != COLOR4D::UNSPECIFIED )
                 {
-                    COLOR_SWATCH* swatch = new COLOR_SWATCH( m_windowObjects, color, layer,
+                    COLOR_SWATCH* swatch = new COLOR_SWATCH( panel, color, layer,
                                                              bgColor, defColor, SWATCH_SMALL );
                     swatch->SetToolTip( _( "Left double click or middle click for color change, "
                                            "right click for menu" ) );
@@ -2275,7 +2277,7 @@ void APPEARANCE_CONTROLS::rebuildObjects()
 
                 if( aSetting->can_control_visibility )
                 {
-                    btn_visible = new BITMAP_TOGGLE( m_windowObjects, layer,
+                    btn_visible = new BITMAP_TOGGLE( panel, layer,
                                                      m_visibleBitmapBundle,
                                                      m_notVisibileBitmapBundle,
                                                      aSetting->visible );
@@ -2296,7 +2298,7 @@ void APPEARANCE_CONTROLS::rebuildObjects()
 
                 sizer->AddSpacer( 5 );
 
-                wxStaticText* label = new wxStaticText( m_windowObjects, layer, aSetting->label );
+                wxStaticText* label = new wxStaticText( panel, layer, aSetting->label );
                 label->Wrap( -1 );
                 label->SetToolTip( aSetting->tooltip );
 
@@ -2321,7 +2323,7 @@ void APPEARANCE_CONTROLS::rebuildObjects()
                     sizer->Add( label, 0, wxALIGN_CENTER_VERTICAL, 0 );
 #endif
 
-                    wxSlider* slider = new wxSlider( m_windowObjects, wxID_ANY, 100, 0, 100,
+                    wxSlider* slider = new wxSlider( panel, wxID_ANY, 100, 0, 100,
                                                      wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL );
 #ifdef __WXMAC__
                     slider->SetMinSize( wxSize( 80, 16 ) );
@@ -2359,7 +2361,7 @@ void APPEARANCE_CONTROLS::rebuildObjects()
                 }
 
                 aSetting->ctl_text = label;
-                m_objectsOuterSizer->Add( sizer, 0, wxEXPAND | wxLEFT | wxRIGHT, 5 );
+                m_objectsOuterSizer->Add( panel, 0, wxEXPAND | wxLEFT | wxRIGHT, 5 );
 
                 if( !aSetting->can_control_opacity )
                     m_objectsOuterSizer->AddSpacer( 2 );
@@ -2398,6 +2400,7 @@ void APPEARANCE_CONTROLS::rebuildObjects()
     }
 
     m_objectsOuterSizer->Layout();
+    m_windowObjects->FitInside();
 }
 
 
@@ -2946,8 +2949,7 @@ void APPEARANCE_CONTROLS::onLayerPresetChanged( wxCommandEvent& aEvent )
 
 void APPEARANCE_CONTROLS::doApplyLayerPreset( const LAYER_PRESET& aPreset )
 {
-    BOARD*           board = m_frame->GetBoard();
-    KIGFX::PCB_VIEW* view = m_frame->GetCanvas()->GetView();
+    BOARD* board = m_frame->GetBoard();
 
     setVisibleLayers( aPreset.layers );
     setVisibleObjects( aPreset.renderLayers );
@@ -2969,11 +2971,9 @@ void APPEARANCE_CONTROLS::doApplyLayerPreset( const LAYER_PRESET& aPreset )
     if( !m_isFpEditor )
         m_frame->GetCanvas()->SyncLayersVisibility( board );
 
-    if( aPreset.flipBoard != view->IsMirroredX() )
-    {
-        view->SetMirror( !view->IsMirroredX(), view->IsMirroredY() );
-        view->RecacheAllItems();
-    }
+    PCB_DISPLAY_OPTIONS options = m_frame->GetDisplayOptions();
+    options.m_FlipBoardView = aPreset.flipBoard;
+    m_frame->SetDisplayOptions( options, false );
 
     m_frame->GetCanvas()->Refresh();
 

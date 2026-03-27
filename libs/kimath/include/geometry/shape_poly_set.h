@@ -31,6 +31,7 @@
 #include <atomic>
 #include <cstdio>
 #include <deque>                        // for deque
+#include <functional>
 #include <iosfwd>                       // for string, stringstream
 #include <memory>
 #include <mutex>
@@ -67,6 +68,9 @@
 class SHAPE_POLY_SET : public SHAPE
 {
 public:
+    /// Callback that submits a unit of work for asynchronous execution.
+    typedef std::function<void( std::function<void()> )> TASK_SUBMITTER;
+
     /// represents a single polygon outline with holes. The first entry is the outline,
     /// the remaining (if any), are the holes
     /// N.B. SWIG only supports typedef, so avoid c++ 'using' keyword
@@ -560,7 +564,7 @@ public:
             m_triangulatedPolys = std::move( aOther.m_triangulatedPolys );
 
             m_hash = aOther.m_hash;
-            m_hashValid = aOther.m_hashValid;
+            m_hashValid.store( aOther.m_hashValid.load() );
             m_triangulationValid.store( aOther.m_triangulationValid );
         }
 
@@ -569,18 +573,14 @@ public:
 
     /**
      * Build a polygon triangulation, needed to draw a polygon on OpenGL and in some
-     * other calculations
-     * @param aPartition = true to created a trinagulation in a partition on a grid
-     * false to create a more basic triangulation of the polygons
-     * Note
-     * in partition calculations the grid size is hard coded to 1e7.
-     * This is a good value for Pcbnew: 1cm, in internal units.
-     * But not good for Gerbview (1e7 = 10cm), however using a partition is not useful.
-     * @param aSimplify = force the algorithm to simplify the POLY_SET before triangulating
+     * other calculations.
+     * @param aSimplify when true, simplify the polygon set before triangulating
+     * @param aSubmitter optional callback for parallel triangulation of partition leaves
      */
-    virtual void CacheTriangulation( bool aPartition = true, bool aSimplify = false )
+    virtual void CacheTriangulation( bool aSimplify = false,
+                                     const TASK_SUBMITTER& aSubmitter = {} )
     {
-        cacheTriangulation( aPartition, aSimplify, nullptr );
+        cacheTriangulation( aSimplify, nullptr, aSubmitter );
     }
     bool IsTriangulationUpToDate() const;
 
@@ -1488,8 +1488,9 @@ public:
     void Scale( double aScaleFactorX, double aScaleFactorY, const VECTOR2I& aCenter );
 
 protected:
-    void cacheTriangulation( bool aPartition, bool aSimplify,
-                             std::vector<std::unique_ptr<TRIANGULATED_POLYGON>>* aHintData );
+    void cacheTriangulation( bool aSimplify,
+                             std::vector<std::unique_ptr<TRIANGULATED_POLYGON>>* aHintData,
+                             const TASK_SUBMITTER& aSubmitter = {} );
 
 private:
     enum DROP_TRIANGULATION_FLAG { SINGLETON };
@@ -1604,7 +1605,7 @@ protected:
 
 private:
     HASH_128 m_hash;
-    bool     m_hashValid = false;
+    std::atomic<bool> m_hashValid = false;
 };
 
 #endif // __SHAPE_POLY_SET_H

@@ -41,7 +41,7 @@ wxDECLARE_EVENT( API_REQUEST_EVENT, wxCommandEvent );
 class KICOMMON_API KICAD_API_SERVER : public wxEvtHandler
 {
 public:
-    KICAD_API_SERVER();
+    KICAD_API_SERVER( bool aAutoStart = true );
 
     ~KICAD_API_SERVER();
 
@@ -67,6 +67,11 @@ public:
 
     void SetReadyToReply( bool aReady = true ) { m_readyToReply = aReady; }
 
+    void SetSocketPath( const wxString& aSocketPath )
+    {
+        m_socketPathOverride = aSocketPath;
+    }
+
     std::string SocketPath() const;
 
     const std::string& Token() const { return m_token; }
@@ -88,6 +93,8 @@ private:
      */
     void handleApiEvent( wxCommandEvent& aEvent );
 
+    void handleApiRequestString( std::string& aRequestString );
+
     void log( const std::string& aOutput );
 
     std::unique_ptr<KINNG_REQUEST_SERVER> m_server;
@@ -97,6 +104,8 @@ private:
     std::string m_token;
 
     bool m_readyToReply;
+
+    wxString m_socketPathOverride;
 
     static wxString s_logFileName;
 

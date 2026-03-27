@@ -44,6 +44,7 @@
 #include <richio.h>
 #include <settings/settings_manager.h>
 #include <settings/kicad_settings.h>
+#include <settings/common_settings.h>
 #include <../include/startwizard/startwizard.h>
 #include <systemdirsappend.h>
 #include <thread_pool.h>
@@ -177,13 +178,7 @@ bool PGM_KICAD::OnPgmInit()
     }
 #endif
 
-    bool skipPythonInit = false;
-
-    if( appType == FRAME_BM2CMP || appType == FRAME_PL_EDITOR || appType == FRAME_GERBER
-        || appType == FRAME_CALC )
-        skipPythonInit = true;
-
-    if( !InitPgm( false, skipPythonInit ) )
+    if( !InitPgm( false ) )
         return false;
 
 
@@ -192,6 +187,13 @@ bool PGM_KICAD::OnPgmInit()
     GetSettingsManager().SetKiway( &Kiway );
     m_bm.Init();
 
+    if( const COMMON_SETTINGS* cfg = Pgm().GetCommonSettings() )
+    {
+        if( cfg->m_Appearance.app_theme == APP_THEME::DARK )
+            KIPLATFORM::APP::EnableDarkMode( true );
+        else if( cfg->m_Appearance.app_theme == APP_THEME::AUTO )
+            KIPLATFORM::APP::EnableDarkMode( false );
+    }
 
     // Add search paths to feed the PGM_KICAD::SysSearch() function,
     // currently limited in support to only look for project templates

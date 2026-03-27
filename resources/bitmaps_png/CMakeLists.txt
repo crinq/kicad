@@ -121,6 +121,7 @@ set( BMAPS_SMALL
     pintype_openemit
     pintype_nic
     pintype_noconnect
+    small_bottom
     small_down
     small_edit
     small_folder
@@ -129,6 +130,7 @@ set( BMAPS_SMALL
     small_plus
     small_refresh
     small_sort_desc
+    small_top
     small_trash
     small_up
     small_warning
@@ -722,6 +724,7 @@ set( BMAPS_CONSTRAINTS
     basic-clearance
     board-outline-clearance
     clearance
+    courtyard-clearance
     copper_to_edge_clearance
     copper-to-hole-clearance
     creepage-distance
@@ -730,20 +733,19 @@ set( BMAPS_CONSTRAINTS
     hole-to-hole-distance
     length
     matched-length-diff-pair
+    matched-length-diff-pair-v2
     maximum-allowed-deviation
     maximum-via-count
     minimum-angular-ring
     minimum-annular-width
     minimum-clearance
     minimum-connection-width
-    minimum-item-clearance
-    minimum-soldermask-silver
+    silk-to-silk-clearance
+    minimum-soldermask-sliver
     minimum-text-height-and-thickness
     minimum_thermal_relief_spoke_count
-    minimum-through-hole
+    minimum-drill-size
     minimum-track-width
-    minimum-uvia-diameter
-    minimum-uvia-hole
     minimum-via-diameter
     permitted-layers
     routing-diff-pair

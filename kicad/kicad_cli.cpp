@@ -90,6 +90,10 @@
 #include "cli/command_version.h"
 #include "cli/exit_codes.h"
 
+#ifdef KICAD_IPC_API
+#include "cli/command_api_server.h"
+#endif
+
 // Add this header after all others, to avoid a collision name in a Windows header
 // on mingw.
 #include <wx/app.h>
@@ -175,6 +179,9 @@ static CLI::SYM_EXPORT_SVG_COMMAND       symExportSvgCmd{};
 static CLI::SYM_UPGRADE_COMMAND          symUpgradeCmd{};
 static CLI::VERSION_COMMAND              versionCmd{};
 
+#ifdef KICAD_IPC_API
+static CLI::API_SERVER_COMMAND           apiServerCmd{};
+#endif
 
 // clang-format off
 static std::vector<COMMAND_ENTRY> commandStack = {
@@ -284,8 +291,14 @@ static std::vector<COMMAND_ENTRY> commandStack = {
         }
     },
     {
-            &versionCmd,
+        &versionCmd,
     }
+#ifdef KICAD_IPC_API
+    ,
+    {
+        &apiServerCmd,
+    }
+#endif
 };
 // clang-format on
 
@@ -414,7 +427,7 @@ bool PGM_KICAD::OnPgmInit()
     }
 #endif
 
-    if( !InitPgm( true, true) )
+    if( !InitPgm( true ) )
         return false;
 
     m_bm.InitSettings( new KICAD_SETTINGS );

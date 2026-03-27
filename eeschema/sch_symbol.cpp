@@ -738,70 +738,35 @@ void SCH_SYMBOL::SetFieldText( const wxString& aFieldName, const wxString& aFiel
         SetRef( aPath, aFieldText );
         break;
 
-    case FIELD_T::FOOTPRINT:
-    {
-        wxString defaultText = GetFootprintFieldText( false, nullptr, false );
-
-        if( aFieldText != defaultText )
-        {
-            if( aVariantName.IsEmpty() )
-            {
-                SetFootprintFieldText( aFieldText );
-            }
-            else
-            {
-                wxCHECK( aPath, /* void */ );
-
-                SCH_SYMBOL_INSTANCE* instance = getInstance( *aPath );
-
-                wxCHECK( instance, /* void */ );
-
-                if( instance->m_Variants.contains( aVariantName ) )
-                {
-                    instance->m_Variants[aVariantName].m_Fields[aFieldName] = aFieldText;
-                }
-                else
-                {
-                    SCH_SYMBOL_VARIANT newVariant( aVariantName );
-
-                    newVariant.InitializeAttributes( *this );
-                    newVariant.m_Fields[aFieldName] = aFieldText;
-                    instance->m_Variants.insert( std::make_pair( aVariantName, newVariant ) );
-                }
-            }
-        }
-
-        break;
-    }
-
     default:
     {
         wxString defaultText = field->GetText( aPath );
 
-        if( aFieldText != defaultText )
+        if( aVariantName.IsEmpty() )
         {
-            if( aVariantName.IsEmpty() )
-            {
+            if( aFieldText != defaultText )
                 field->SetText( aFieldText );
-            }
-            else
+        }
+        else
+        {
+            SCH_SYMBOL_INSTANCE* instance = getInstance( *aPath );
+
+            wxCHECK( instance, /* void */ );
+
+            if( instance->m_Variants.contains( aVariantName ) )
             {
-                SCH_SYMBOL_INSTANCE* instance = getInstance( *aPath );
-
-                wxCHECK( instance, /* void */ );
-
-                if( instance->m_Variants.contains( aVariantName ) )
-                {
+                if( aFieldText != defaultText )
                     instance->m_Variants[aVariantName].m_Fields[aFieldName] = aFieldText;
-                }
                 else
-                {
-                    SCH_SYMBOL_VARIANT newVariant( aVariantName );
+                    instance->m_Variants[aVariantName].m_Fields.erase( aFieldName );
+            }
+            else if( aFieldText != defaultText )
+            {
+                SCH_SYMBOL_VARIANT newVariant( aVariantName );
 
-                    newVariant.InitializeAttributes( *this );
-                    newVariant.m_Fields[aFieldName] = aFieldText;
-                    instance->m_Variants.insert( std::make_pair( aVariantName, newVariant ) );
-                }
+                newVariant.InitializeAttributes( *this );
+                newVariant.m_Fields[aFieldName] = aFieldText;
+                instance->m_Variants.insert( std::make_pair( aVariantName, newVariant ) );
             }
         }
 
@@ -1832,6 +1797,8 @@ bool SCH_SYMBOL::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* token,
     if( !schematic )
         return false;
 
+    wxString variant = aVariantName.IsEmpty() ? schematic->GetCurrentVariant() : aVariantName;
+
     if( operatingPoint.Matches( *token ) )
     {
         wxString pin( operatingPoint.GetMatch( *token, 1 ).Lower() );
@@ -1929,10 +1896,10 @@ bool SCH_SYMBOL::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* token,
             else if( !aVariantName.IsEmpty() )
             {
                 // Check for variant-specific field value
-                std::optional<SCH_SYMBOL_VARIANT> variant = GetVariant( *aPath, aVariantName );
+                std::optional<SCH_SYMBOL_VARIANT> symVariant = GetVariant( *aPath, aVariantName );
 
-                if( variant && variant->m_Fields.contains( fieldName ) )
-                    *token = variant->m_Fields.at( fieldName );
+                if( symVariant && symVariant->m_Fields.contains( fieldName ) )
+                    *token = symVariant->m_Fields.at( fieldName );
                 else
                     *token = field.GetShownText( aPath, false, aDepth + 1 );
             }
@@ -2026,7 +1993,7 @@ bool SCH_SYMBOL::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* token,
     {
         *token = wxEmptyString;
 
-        if( aPath->GetExcludedFromBOM() || this->ResolveExcludedFromBOM() )
+        if( aPath->GetExcludedFromBOM( variant ) || this->ResolveExcludedFromBOM( aPath, variant ) )
             *token = _( "Excluded from BOM" );
 
         return true;
@@ -2035,7 +2002,7 @@ bool SCH_SYMBOL::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* token,
     {
         *token = wxEmptyString;
 
-        if( aPath->GetExcludedFromBoard() || this->ResolveExcludedFromBoard() )
+        if( aPath->GetExcludedFromBoard( variant ) || this->ResolveExcludedFromBoard( aPath, variant ) )
             *token = _( "Excluded from board" );
 
         return true;
@@ -2044,7 +2011,7 @@ bool SCH_SYMBOL::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* token,
     {
         *token = wxEmptyString;
 
-        if( aPath->GetExcludedFromSim() || this->ResolveExcludedFromSim() )
+        if( aPath->GetExcludedFromSim( variant ) || this->ResolveExcludedFromSim( aPath, variant ) )
             *token = _( "Excluded from simulation" );
 
         return true;
@@ -2053,9 +2020,7 @@ bool SCH_SYMBOL::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* token,
     {
         *token = wxEmptyString;
 
-        wxString variant = aVariantName.IsEmpty() ? schematic->GetCurrentVariant() : aVariantName;
-
-        if( aPath->GetDNP() || this->ResolveDNP( aPath, variant ) )
+        if( aPath->GetDNP( variant ) || this->ResolveDNP( aPath, variant ) )
             *token = _( "DNP" );
 
         return true;

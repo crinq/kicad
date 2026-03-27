@@ -233,7 +233,7 @@ public:
      *
      * @return true if the repaint attempt was successful.
      */
-    bool DoRePaint();
+    bool DoRePaint( bool aAllowSkip = true );
 
     /**
      * Create an overlay for rendering debug graphics.
@@ -313,6 +313,9 @@ protected:
     /// Flag to indicate that focus should be regained on the next mouse event. It is a workaround
     /// for cases when the panel loses keyboard focus, so it does not react to hotkeys anymore.
     bool                     m_lostFocus;
+
+    /// Set after an OpenGL recovery attempt to prevent infinite retry loops
+    bool                     m_glRecoveryAttempted;
 
     /// Flag to indicate whether the panel should take focus at certain times (when moused over,
     /// and on various mouse/key events)

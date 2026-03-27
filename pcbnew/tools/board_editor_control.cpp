@@ -52,6 +52,7 @@
 #include <dialogs/dialog_assign_netclass.h>
 #include <dialog_plot.h>
 #include <dialogs/rule_editor_dialog_base.h>
+#include <dialogs/dialog_find_by_properties.h>
 #include <kiface_base.h>
 #include <kiway.h>
 #include <netlist_reader/pcb_netlist.h>
@@ -412,6 +413,13 @@ int BOARD_EDITOR_CONTROL::FindNext( const TOOL_EVENT& aEvent )
 }
 
 
+int BOARD_EDITOR_CONTROL::FindByProperties( const TOOL_EVENT& aEvent )
+{
+    m_frame->ShowFindByPropertiesDialog();
+    return 0;
+}
+
+
 int BOARD_EDITOR_CONTROL::BoardSetup( const TOOL_EVENT& aEvent )
 {
     getEditFrame<PCB_EDIT_FRAME>()->ShowBoardSetupDialog();
@@ -570,95 +578,53 @@ int BOARD_EDITOR_CONTROL::RepairBoard( const TOOL_EVENT& aEvent )
     wxString details;
     bool     quiet = aEvent.Parameter<bool>();
 
-    // Repair duplicate IDs and missing nets.
-    std::set<KIID> ids;
-    int            duplicates = 0;
-
-    auto processItem =
-            [&]( EDA_ITEM* aItem )
-            {
-                if( ids.count( aItem->m_Uuid ) )
-                {
-                    duplicates++;
-                    const_cast<KIID&>( aItem->m_Uuid ) = KIID();
-                }
-
-                ids.insert( aItem->m_Uuid );
-
-                BOARD_CONNECTED_ITEM* cItem = dynamic_cast<BOARD_CONNECTED_ITEM*>( aItem );
-
-                if( cItem && cItem->GetNetCode() )
-                {
-                    NETINFO_ITEM* netinfo = cItem->GetNet();
-
-                    if( netinfo && !board()->FindNet( netinfo->GetNetname() ) )
-                    {
-                        board()->Add( netinfo );
-
-                        details += wxString::Format( _( "Orphaned net %s re-parented.\n" ),
-                                                     netinfo->GetNetname() );
-                        errors++;
-                    }
-                }
-            };
-
-    // Footprint IDs are the most important, so give them the first crack at "claiming" a
-    // particular KIID.
-
-    for( FOOTPRINT* footprint : board()->Footprints() )
-        processItem( footprint );
-
-    // After that the principal use is for DRC marker pointers, which are most likely to pads
-    // or tracks.
-
-    for( FOOTPRINT* footprint : board()->Footprints() )
-    {
-        for( PAD* pad : footprint->Pads() )
-            processItem( pad );
-    }
-
-    for( PCB_TRACK* track : board()->Tracks() )
-        processItem( track );
-
-    // From here out I don't think order matters much.
-
-    for( FOOTPRINT* footprint : board()->Footprints() )
-    {
-        processItem( &footprint->Reference() );
-        processItem( &footprint->Value() );
-
-        for( BOARD_ITEM* item : footprint->GraphicalItems() )
-            processItem( item );
-
-        for( ZONE* zone : footprint->Zones() )
-            processItem( zone );
-
-        for( PCB_GROUP* group : footprint->Groups() )
-            processItem( group );
-    }
-
-    // Everything owned by the board not handled above
-    for( BOARD_ITEM* item : board()->GetItemSet() )
-    {
-        // Top-level footprints and tracks were handled above.
-        switch( item->Type() )
-        {
-        case PCB_FOOTPRINT_T:
-        case PCB_TRACE_T:
-        case PCB_ARC_T:
-        case PCB_VIA_T:
-            break;
-
-        default:
-            processItem( item );
-            break;
-        }
-    }
+    int duplicates = board()->RepairDuplicateItemUuids();
 
     if( duplicates )
     {
         errors += duplicates;
         details += wxString::Format( _( "%d duplicate IDs replaced.\n" ), duplicates );
+    }
+
+    for( FOOTPRINT* footprint : board()->Footprints() )
+    {
+        for( PAD* pad : footprint->Pads() )
+        {
+            BOARD_CONNECTED_ITEM* cItem = pad;
+
+            if( cItem->GetNetCode() )
+            {
+                NETINFO_ITEM* netinfo = cItem->GetNet();
+
+                if( netinfo && !board()->FindNet( netinfo->GetNetname() ) )
+                {
+                    board()->Add( netinfo );
+
+                    details += wxString::Format( _( "Orphaned net %s re-parented.\n" ),
+                                                 netinfo->GetNetname() );
+                    errors++;
+                }
+            }
+        }
+    }
+
+    for( PCB_TRACK* track : board()->Tracks() )
+    {
+        BOARD_CONNECTED_ITEM* cItem = track;
+
+        if( cItem->GetNetCode() )
+        {
+            NETINFO_ITEM* netinfo = cItem->GetNet();
+
+            if( netinfo && !board()->FindNet( netinfo->GetNetname() ) )
+            {
+                board()->Add( netinfo );
+
+                details += wxString::Format( _( "Orphaned net %s re-parented.\n" ),
+                                             netinfo->GetNetname() );
+                errors++;
+            }
+        }
     }
 
     /*******************************
@@ -690,9 +656,16 @@ int BOARD_EDITOR_CONTROL::RepairBoard( const TOOL_EVENT& aEvent )
 int BOARD_EDITOR_CONTROL::UpdatePCBFromSchematic( const TOOL_EVENT& aEvent )
 {
     NETLIST netlist;
+    bool    fetched = false;
 
-    if( m_frame->FetchNetlistFromSchematic( netlist, _( "Updating PCB requires a fully annotated "
-                                                        "schematic." ) ) )
+    RunMainStack(
+            [&]()
+            {
+                fetched = m_frame->FetchNetlistFromSchematic(
+                        netlist, _( "Updating PCB requires a fully annotated schematic." ) );
+            } );
+
+    if( fetched )
     {
         DIALOG_UPDATE_PCB updateDialog( m_frame, &netlist );
         updateDialog.ShowModal();
@@ -761,56 +734,60 @@ int BOARD_EDITOR_CONTROL::ShowEeschema( const TOOL_EVENT& aEvent )
     }
     else
     {
-        KIWAY_PLAYER* frame = m_frame->Kiway().Player( FRAME_SCH, false );
+        RunMainStack(
+                [&]()
+                {
+                    KIWAY_PLAYER* frame = m_frame->Kiway().Player( FRAME_SCH, false );
 
-        // Please: note: DIALOG_EDIT_LIBENTRY_FIELDS_IN_LIB::initBuffers() calls
-        // Kiway.Player( FRAME_SCH, true )
-        // therefore, the schematic editor is sometimes running, but the schematic project
-        // is not loaded, if the library editor was called, and the dialog field editor was used.
-        // On Linux, it happens the first time the schematic editor is launched, if
-        // library editor was running, and the dialog field editor was open
-        // On Windows, it happens always after the library editor was called,
-        // and the dialog field editor was used
-        if( !frame )
-        {
-            try
-            {
-                frame = boardFrame->Kiway().Player( FRAME_SCH, true );
-            }
-            catch( const IO_ERROR& err )
-            {
+                    // Please: note: DIALOG_EDIT_LIBENTRY_FIELDS_IN_LIB::initBuffers() calls
+                    // Kiway.Player( FRAME_SCH, true )
+                    // therefore, the schematic editor is sometimes running, but the schematic project
+                    // is not loaded, if the library editor was called, and the dialog field editor was used.
+                    // On Linux, it happens the first time the schematic editor is launched, if
+                    // library editor was running, and the dialog field editor was open
+                    // On Windows, it happens always after the library editor was called,
+                    // and the dialog field editor was used
+                    if( !frame )
+                    {
+                        try
+                        {
+                            frame = boardFrame->Kiway().Player( FRAME_SCH, true );
+                        }
+                        catch( const IO_ERROR& err )
+                        {
+                            DisplayErrorMessage( boardFrame,
+                                                 _( "Eeschema failed to load." ) + wxS( "\n" ) + err.What() );
+                            return;
+                        }
+                    }
 
-                DisplayErrorMessage( boardFrame, _( "Eeschema failed to load." ) + wxS( "\n" ) + err.What() );
-                return 0;
-            }
-        }
+                    wxEventBlocker blocker( boardFrame );
 
-        wxEventBlocker blocker( boardFrame );
+                    // If Kiway() cannot create the eeschema frame, it shows a error message, and
+                    // frame is null
+                    if( !frame )
+                        return;
 
-        // If Kiway() cannot create the eeschema frame, it shows a error message, and
-        // frame is null
-        if( !frame )
-            return 0;
+                    if( !frame->IsShownOnScreen() ) // the frame exists, (created by the dialog field editor)
+                                                    // but no project loaded.
+                    {
+                        frame->OpenProjectFiles( std::vector<wxString>( 1, schematic.GetFullPath() ) );
+                        frame->Show( true );
+                    }
 
-        if( !frame->IsShownOnScreen() ) // the frame exists, (created by the dialog field editor)
-                                        // but no project loaded.
-        {
-            frame->OpenProjectFiles( std::vector<wxString>( 1, schematic.GetFullPath() ) );
-            frame->Show( true );
-        }
+                    // On Windows, Raise() does not bring the window on screen, when iconized or not shown
+                    // On Linux, Raise() brings the window on screen, but this code works fine
+                    if( frame->IsIconized() )
+                    {
+                        frame->Iconize( false );
 
-        // On Windows, Raise() does not bring the window on screen, when iconized or not shown
-        // On Linux, Raise() brings the window on screen, but this code works fine
-        if( frame->IsIconized() )
-        {
-            frame->Iconize( false );
+                        // If an iconized frame was created by Pcbnew, Iconize( false ) is not enough
+                        // to show the frame at its normal size: Maximize should be called.
+                        frame->Maximize( false );
+                    }
 
-            // If an iconized frame was created by Pcbnew, Iconize( false ) is not enough
-            // to show the frame at its normal size: Maximize should be called.
-            frame->Maximize( false );
-        }
-
-        frame->Raise();
+                    frame->Raise();
+                } );
     }
 
     return 0;
@@ -848,13 +825,6 @@ int BOARD_EDITOR_CONTROL::ToggleLibraryTree( const TOOL_EVENT& aEvent )
 int BOARD_EDITOR_CONTROL::ToggleSearch( const TOOL_EVENT& aEvent )
 {
     getEditFrame<PCB_EDIT_FRAME>()->ToggleSearch();
-    return 0;
-}
-
-
-int BOARD_EDITOR_CONTROL::TogglePythonConsole( const TOOL_EVENT& aEvent )
-{
-    m_frame->ScriptingConsoleEnableDisable();
     return 0;
 }
 
@@ -1494,8 +1464,17 @@ static bool mergeZones( EDA_DRAW_FRAME* aFrame, BOARD_COMMIT& aCommit,
         return false;
     }
 
+    // Adopt the highest priority from all merged zones so the result maintains
+    // the most aggressive fill ordering.
+    unsigned highestPriority = aOriginZones[0]->GetAssignedPriority();
+
     for( unsigned int i = 1; i < aOriginZones.size(); i++ )
+    {
+        highestPriority = std::max( highestPriority, aOriginZones[i]->GetAssignedPriority() );
         aCommit.Remove( aOriginZones[i] );
+    }
+
+    aOriginZones[0]->SetAssignedPriority( highestPriority );
 
     aMergedZones.push_back( aOriginZones[0] );
 
@@ -1536,12 +1515,6 @@ int BOARD_EDITOR_CONTROL::ZoneMerge( const TOOL_EVENT& aEvent )
         if( firstZone->GetNetCode() != netcode )
         {
             wxLogMessage( _( "Some zone netcodes did not match and were not merged." ) );
-            continue;
-        }
-
-        if( curr_area->GetAssignedPriority() != firstZone->GetAssignedPriority() )
-        {
-            wxLogMessage( _( "Some zone priorities did not match and were not merged." ) );
             continue;
         }
 
@@ -1856,6 +1829,7 @@ void BOARD_EDITOR_CONTROL::setTransitions()
     Go( &BOARD_EDITOR_CONTROL::Find,                   ACTIONS::find.MakeEvent() );
     Go( &BOARD_EDITOR_CONTROL::FindNext,               ACTIONS::findNext.MakeEvent() );
     Go( &BOARD_EDITOR_CONTROL::FindNext,               ACTIONS::findPrevious.MakeEvent() );
+    Go( &BOARD_EDITOR_CONTROL::FindByProperties, PCB_ACTIONS::findByProperties.MakeEvent() );
 
     Go( &BOARD_EDITOR_CONTROL::OpenNonKicadBoard,      PCB_ACTIONS::openNonKicadBoard.MakeEvent() );
     Go( &BOARD_EDITOR_CONTROL::ExportFootprints,       PCB_ACTIONS::exportFootprints.MakeEvent() );
@@ -1925,7 +1899,6 @@ void BOARD_EDITOR_CONTROL::setTransitions()
     Go( &BOARD_EDITOR_CONTROL::ToggleNetInspector,     PCB_ACTIONS::showNetInspector.MakeEvent() );
     Go( &BOARD_EDITOR_CONTROL::ToggleLibraryTree,      PCB_ACTIONS::showDesignBlockPanel.MakeEvent() );
     Go( &BOARD_EDITOR_CONTROL::ToggleSearch,           PCB_ACTIONS::showSearch.MakeEvent() );
-    Go( &BOARD_EDITOR_CONTROL::TogglePythonConsole,    PCB_ACTIONS::showPythonConsole.MakeEvent() );
     Go( &BOARD_EDITOR_CONTROL::RepairBoard,            PCB_ACTIONS::repairBoard.MakeEvent() );
     // Line modes: explicit, next, and notification
     Go( &BOARD_EDITOR_CONTROL::ChangeLineMode,        PCB_ACTIONS::lineModeFree.MakeEvent() );

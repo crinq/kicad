@@ -79,6 +79,26 @@ PCB_TEXT::PCB_TEXT( FOOTPRINT* aParent, KICAD_T idtype ) :
 }
 
 
+PCB_TEXT::PCB_TEXT( const PCB_TEXT& aOther ) :
+        BOARD_ITEM( aOther ),
+        EDA_TEXT( aOther )
+{
+}
+
+
+PCB_TEXT& PCB_TEXT::operator=( const PCB_TEXT& aOther )
+{
+    if( this == &aOther )
+        return *this;
+
+    BOARD_ITEM::operator=( aOther );
+    EDA_TEXT::operator=( aOther );
+    m_knockout_cache.reset();
+
+    return *this;
+}
+
+
 PCB_TEXT::~PCB_TEXT()
 {
 }
@@ -123,7 +143,7 @@ bool PCB_TEXT::Deserialize( const google::protobuf::Any& aContainer )
         return false;
 
     SetLayer( FromProtoEnum<PCB_LAYER_ID, kiapi::board::types::BoardLayer>( boardText.layer() ) );
-    const_cast<KIID&>( m_Uuid ) = KIID( boardText.id().value() );
+    SetUuidDirect( KIID( boardText.id().value() ) );
     SetIsKnockout( boardText.knockout() );
     SetLocked( boardText.locked() == types::LockedState::LS_LOCKED );
 
@@ -276,10 +296,26 @@ void PCB_TEXT::GetMsgPanelInfo( EDA_DRAW_FRAME* aFrame, std::vector<MSG_PANEL_IT
         aList.emplace_back( _( "Footprint" ), parentFP->GetReference() );
 
     // Don't use GetShownText() here; we want to show the user the variable references
+    wxString value = GetText();
+
     if( parentFP )
-        aList.emplace_back( _( "Text" ), KIUI::EllipsizeStatusText( aFrame, GetText() ) );
+    {
+        if( PCB_FIELD* field = dynamic_cast<PCB_FIELD*>( this ) )
+        {
+            wxString variant;
+
+            if( BOARD* board = parentFP->GetBoard() )
+                variant = board->GetCurrentVariant();
+
+            value = parentFP->GetFieldValueForVariant( variant, field->GetName() );
+        }
+
+        aList.emplace_back( _( "Text" ), KIUI::EllipsizeStatusText( aFrame, value ) );
+    }
     else
-        aList.emplace_back( _( "PCB Text" ), KIUI::EllipsizeStatusText( aFrame, GetText() ) );
+    {
+        aList.emplace_back( _( "PCB Text" ), KIUI::EllipsizeStatusText( aFrame, value ) );
+    }
 
     if( parentFP )
         aList.emplace_back( _( "Type" ), GetTextTypeDescription() );
@@ -509,33 +545,37 @@ std::shared_ptr<SHAPE> PCB_TEXT::GetEffectiveShape( PCB_LAYER_ID aLayer, FLASHIN
 }
 
 
-SHAPE_POLY_SET PCB_TEXT::GetKnockoutCache( const KIFONT::FONT* aFont, const wxString& forResolvedText,
-                                           int aMaxError ) const
+const SHAPE_POLY_SET& PCB_TEXT::GetKnockoutCache( const KIFONT::FONT* aFont, const wxString& forResolvedText,
+                                                  int aMaxError ) const
 {
     TEXT_ATTRIBUTES attrs = GetAttributes();
     EDA_ANGLE       drawAngle = GetDrawRotation();
     VECTOR2I        drawPos = GetDrawPos();
 
-    if( m_knockout_cache.IsEmpty() || m_knockout_cache_text_attrs != attrs || m_knockout_cache_text != forResolvedText
-        || m_knockout_cache_angle != drawAngle )
+    if( !m_knockout_cache )
+        m_knockout_cache = std::make_unique<PCB_TEXT_KNOCKOUT_CACHE_DATA>();
+
+    if( m_knockout_cache->cache.IsEmpty() || m_knockout_cache->text_attrs != attrs
+        || m_knockout_cache->text != forResolvedText
+        || m_knockout_cache->angle != drawAngle )
     {
-        m_knockout_cache.RemoveAllContours();
+        m_knockout_cache->cache.RemoveAllContours();
 
-        TransformTextToPolySet( m_knockout_cache, 0, aMaxError, ERROR_INSIDE );
-        m_knockout_cache.Fracture();
+        TransformTextToPolySet( m_knockout_cache->cache, 0, aMaxError, ERROR_INSIDE );
+        m_knockout_cache->cache.Fracture();
 
-        m_knockout_cache_text_attrs = attrs;
-        m_knockout_cache_angle = drawAngle;
-        m_knockout_cache_text = forResolvedText;
-        m_knockout_cache_pos = drawPos;
+        m_knockout_cache->text_attrs = attrs;
+        m_knockout_cache->angle = drawAngle;
+        m_knockout_cache->text = forResolvedText;
+        m_knockout_cache->pos = drawPos;
     }
-    else if( m_knockout_cache_pos != drawPos )
+    else if( m_knockout_cache->pos != drawPos )
     {
-        m_knockout_cache.Move( drawPos - m_knockout_cache_pos );
-        m_knockout_cache_pos = drawPos;
+        m_knockout_cache->cache.Move( drawPos - m_knockout_cache->pos );
+        m_knockout_cache->pos = drawPos;
     }
 
-    return m_knockout_cache;
+    return m_knockout_cache->cache;
 }
 
 

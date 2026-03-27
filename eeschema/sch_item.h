@@ -798,7 +798,5 @@ private:
     friend class LIB_SYMBOL;
 };
 
-#ifndef SWIG
 DECLARE_ENUM_TO_WXANY( SCH_LAYER_ID );
-#endif
 

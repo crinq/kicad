@@ -25,13 +25,17 @@
 #include <cstdio>
 #include <memory>
 #include <mutex>
+
 #include <wx/log.h>
+
 #include <board.h>
 #include <board_design_settings.h>
 #include <component_classes/component_class.h>
 #include <drc/drc_rtree.h>
 #include <drc/drc_engine.h>
+#include <footprint.h>
 #include <lset.h>
+#include <pad.h>
 #include <pcb_track.h>
 #include <pcb_group.h>
 #include <geometry/shape_segment.h>
@@ -1505,16 +1509,18 @@ void PCBEXPR_BUILTIN_FUNCTIONS::RegisterAllFunctions()
 
     RegisterFunc( wxT( "isPlated()" ), isPlatedFunc );
 
-    RegisterFunc( wxT( "insideCourtyard('x') DEPRECATED" ), intersectsCourtyardFunc );
-    RegisterFunc( wxT( "insideFrontCourtyard('x') DEPRECATED" ), intersectsFrontCourtyardFunc );
-    RegisterFunc( wxT( "insideBackCourtyard('x') DEPRECATED" ), intersectsBackCourtyardFunc );
-    RegisterFunc( wxT( "intersectsCourtyard('x')" ), intersectsCourtyardFunc );
-    RegisterFunc( wxT( "intersectsFrontCourtyard('x')" ), intersectsFrontCourtyardFunc );
-    RegisterFunc( wxT( "intersectsBackCourtyard('x')" ), intersectsBackCourtyardFunc );
+    // Geometry-dependent functions depend on item position/shape rather than item properties.
+    // The third argument marks them so that CreateFuncCall() can detect them automatically.
+    RegisterFunc( wxT( "insideCourtyard('x') DEPRECATED" ), intersectsCourtyardFunc, true );
+    RegisterFunc( wxT( "insideFrontCourtyard('x') DEPRECATED" ), intersectsFrontCourtyardFunc, true );
+    RegisterFunc( wxT( "insideBackCourtyard('x') DEPRECATED" ), intersectsBackCourtyardFunc, true );
+    RegisterFunc( wxT( "intersectsCourtyard('x')" ), intersectsCourtyardFunc, true );
+    RegisterFunc( wxT( "intersectsFrontCourtyard('x')" ), intersectsFrontCourtyardFunc, true );
+    RegisterFunc( wxT( "intersectsBackCourtyard('x')" ), intersectsBackCourtyardFunc, true );
 
-    RegisterFunc( wxT( "insideArea('x') DEPRECATED" ), intersectsAreaFunc );
-    RegisterFunc( wxT( "intersectsArea('x')" ), intersectsAreaFunc );
-    RegisterFunc( wxT( "enclosedByArea('x')" ), enclosedByAreaFunc );
+    RegisterFunc( wxT( "insideArea('x') DEPRECATED" ), intersectsAreaFunc, true );
+    RegisterFunc( wxT( "intersectsArea('x')" ), intersectsAreaFunc, true );
+    RegisterFunc( wxT( "enclosedByArea('x')" ), enclosedByAreaFunc, true );
 
     RegisterFunc( wxT( "isMicroVia()" ), isMicroVia );
     RegisterFunc( wxT( "isBlindVia()" ), isBlindVia );

@@ -28,6 +28,7 @@
 #define EDA_ITEM_H
 
 #include <deque>
+#include <set>
 
 #include <api/serializable.h>
 #include <core/typeinfo.h>
@@ -382,6 +383,11 @@ public:
      * @return The menu text string.
      */
     virtual wxString GetItemDescription( UNITS_PROVIDER* aUnitsProvider, bool aFull ) const;
+
+    virtual wxString DisambiguateItemDescription( UNITS_PROVIDER* aUnitsProvider, bool aFull ) const
+    {
+        return GetItemDescription( aUnitsProvider, aFull );
+    }
 
     /**
      * Return a pointer to an image to be used in menus.

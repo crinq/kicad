@@ -51,6 +51,7 @@
 #include <confirm.h>
 #include <design_block_library_adapter.h>
 
+#include <settings/common_settings.h>
 #include <settings/kicad_settings.h>
 #include <settings/settings_manager.h>
 #include <paths.h>
@@ -354,16 +355,7 @@ bool PGM_SINGLE_TOP::OnPgmInit()
         return false;
     }
 
-    // Not all KiCad applications use the python stuff. skip python init
-    // for these apps.
-    bool skip_python_initialization = false;
-
-#if defined( BITMAP_2_CMP ) || defined( PL_EDITOR ) || defined( GERBVIEW ) || \
-    defined( PCB_CALCULATOR_BUILD )
-    skip_python_initialization = true;
-#endif
-
-    if( !InitPgm( false, skip_python_initialization ) )
+    if( !InitPgm( false ) )
     {
         // Clean up
         OnPgmExit();
@@ -393,6 +385,15 @@ bool PGM_SINGLE_TOP::OnPgmInit()
     GetSettingsManager().SetKiway( &Kiway );
 
     GetSettingsManager().RegisterSettings( new KICAD_SETTINGS );
+
+
+    if( const COMMON_SETTINGS* cfg = Pgm().GetCommonSettings() )
+    {
+        if( cfg->m_Appearance.app_theme == APP_THEME::DARK )
+            KIPLATFORM::APP::EnableDarkMode( true );
+        else if( cfg->m_Appearance.app_theme == APP_THEME::AUTO )
+            KIPLATFORM::APP::EnableDarkMode( false );
+    }
 
 #ifdef KICAD_IPC_API
     // Create the API server thread once the app event loop exists

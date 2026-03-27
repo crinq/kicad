@@ -794,6 +794,8 @@ bool SCH_LABEL_BASE::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* toke
     if( !schematic )
         return false;
 
+    wxString variant = schematic->GetCurrentVariant();
+
     if( operatingPoint.Matches( *token ) )
     {
         int      precision = 3;
@@ -865,7 +867,7 @@ bool SCH_LABEL_BASE::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* toke
 
         for( SCH_RULE_AREA* ruleArea : directive->GetConnectedRuleAreas() )
         {
-            if( ruleArea->GetExcludedFromBOM() )
+            if( ruleArea->GetExcludedFromBOM( aPath, variant ) )
                 *token = _( "Excluded from BOM" );
         }
 
@@ -878,7 +880,7 @@ bool SCH_LABEL_BASE::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* toke
 
         for( SCH_RULE_AREA* ruleArea : directive->GetConnectedRuleAreas() )
         {
-            if( ruleArea->GetExcludedFromBoard() )
+            if( ruleArea->GetExcludedFromBoard( aPath, variant ) )
                 *token = _( "Excluded from board" );
         }
 
@@ -891,7 +893,7 @@ bool SCH_LABEL_BASE::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* toke
 
         for( SCH_RULE_AREA* ruleArea : directive->GetConnectedRuleAreas() )
         {
-            if( ruleArea->GetExcludedFromSim() )
+            if( ruleArea->GetExcludedFromSim( aPath, variant ) )
                 *token = _( "Excluded from simulation" );
         }
 
@@ -904,7 +906,7 @@ bool SCH_LABEL_BASE::ResolveTextVar( const SCH_SHEET_PATH* aPath, wxString* toke
 
         for( SCH_RULE_AREA* ruleArea : directive->GetConnectedRuleAreas() )
         {
-            if( ruleArea->GetDNP() )
+            if( ruleArea->GetDNP( aPath, variant ) )
                 *token = _( "DNP" );
         }
 
@@ -1683,6 +1685,13 @@ SCH_DIRECTIVE_LABEL::SCH_DIRECTIVE_LABEL( const SCH_DIRECTIVE_LABEL& aClassLabel
 }
 
 
+SCH_DIRECTIVE_LABEL::~SCH_DIRECTIVE_LABEL()
+{
+    for( SCH_RULE_AREA* ruleArea : m_connected_rule_areas )
+        ruleArea->RemoveDirective( this );
+}
+
+
 void SCH_DIRECTIVE_LABEL::Serialize( google::protobuf::Any& aContainer ) const
 {
     UNIMPLEMENTED_FOR( GetClass() );
@@ -1958,6 +1967,24 @@ const std::unordered_set<SCH_RULE_AREA*> SCH_DIRECTIVE_LABEL::GetConnectedRuleAr
 bool SCH_DIRECTIVE_LABEL::IsDangling() const
 {
     return m_isDangling && m_connected_rule_areas.empty();
+}
+
+bool SCH_DIRECTIVE_LABEL::IncrementLabel( int aIncrement )
+{
+    for( SCH_FIELD& field : m_fields )
+    {
+        if( field.GetCanonicalName() == wxT( "Netclass" ) || field.GetCanonicalName() == wxT( "Component Class" ) )
+        {
+            wxString text = field.GetText();
+
+            if( IncrementString( text, aIncrement ) )
+            {
+                field.SetText( text );
+            }
+        }
+    }
+
+    return true;
 }
 
 

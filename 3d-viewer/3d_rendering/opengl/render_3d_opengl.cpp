@@ -24,15 +24,16 @@
  */
 
 #include <cstdint>
-#include <gal/opengl/kiglew.h>    // Must be included first
+#include <kicad_gl/kiglad.h>    // Must be included first
 
 #include "plugins/3dapi/xv3d_types.h"
 #include "render_3d_opengl.h"
 #include "opengl_utils.h"
 #include "common_ogl/ogl_utils.h"
+#include "../3d_placeholder_utils.h"
 #include <board.h>
 #include <footprint.h>
-#include <gal/opengl/gl_context_mgr.h>
+#include <kicad_gl/gl_context_mgr.h>
 #include <3d_math.h>
 #include <glm/geometric.hpp>
 #include <lset.h>
@@ -115,6 +116,8 @@ RENDER_3D_OPENGL::~RENDER_3D_OPENGL()
     wxLogTrace( m_logTrace, wxT( "RENDER_3D_OPENGL::RENDER_3D_OPENGL" ) );
 
     freeAllLists();
+
+    delete m_placeholderModel;
 
     glDeleteTextures( 1, &m_circleTexture );
 
@@ -1219,6 +1222,7 @@ void RENDER_3D_OPENGL::freeAllLists()
     DELETE_AND_FREE( m_padHoles )
     DELETE_AND_FREE( m_viaFrontCover )
     DELETE_AND_FREE( m_viaBackCover )
+    DELETE_AND_FREE( m_placeholderModel )
 
     // Free per-area display lists
     for( auto& [idx, map] : m_areaLayers )
@@ -1357,7 +1361,6 @@ void RENDER_3D_OPENGL::get3dModelsSelected( std::list<MODELTORENDER> &aDstRender
         return;
 
     EDA_3D_VIEWER_SETTINGS::RENDER_SETTINGS& cfg = m_boardAdapter.m_Cfg->m_Render;
-    const wxString currentVariant = m_boardAdapter.GetBoard()->GetCurrentVariant();
 
     // Go for all footprints
     for( FOOTPRINT* fp : m_boardAdapter.GetBoard()->Footprints() )
@@ -1376,14 +1379,13 @@ void RENDER_3D_OPENGL::get3dModelsSelected( std::list<MODELTORENDER> &aDstRender
                 continue;
         }
 
-        if( !fp->Models().empty() )
+        bool hasModels = !fp->Models().empty();
+        bool showMissing = m_boardAdapter.m_Cfg->m_Render.show_missing_models;
+
+        if( hasModels || showMissing )
         {
             if( m_boardAdapter.IsFootprintShown( fp ) )
             {
-                // Skip 3D models for footprints that are DNP in the current variant
-                if( fp->GetDNPForVariant( currentVariant ) )
-                    continue;
-
                 const bool isFlipped = fp->IsFlipped();
 
                 if( aGetTop == !isFlipped || aGetBot == isFlipped )
@@ -1417,8 +1419,7 @@ void RENDER_3D_OPENGL::get3dModelsFromFootprint( std::list<MODELTORENDER> &aDstR
         }
 
         fpMatrix = glm::translate( fpMatrix, SFVEC3F( pos.x * m_boardAdapter.BiuTo3dUnits(),
-                                                      -pos.y * m_boardAdapter.BiuTo3dUnits(),
-                                                      zpos ) );
+                                                      -pos.y * m_boardAdapter.BiuTo3dUnits(), zpos ) );
 
         if( !aFootprint->GetOrientation().IsZero() )
         {
@@ -1446,7 +1447,11 @@ void RENDER_3D_OPENGL::get3dModelsFromFootprint( std::list<MODELTORENDER> &aDstR
             auto cache_i = m_3dModelMap.find( sM.m_Filename );
 
             if( cache_i == m_3dModelMap.end() )
+            {
+                renderPlaceholderForFootprint( aDstRenderList, fpMatrix, aFootprint, aRenderTransparentOnly,
+                                               aIsSelected, aRenderTransparentOnly ? sM.m_Opacity : 1.0f );
                 continue;
+            }
 
             if( const MODEL_3D* modelPtr = cache_i->second )
             {
@@ -1492,6 +1497,75 @@ void RENDER_3D_OPENGL::get3dModelsFromFootprint( std::list<MODELTORENDER> &aDstR
                 }
             }
         }
+    }
+    else
+    {
+        const double zpos = m_boardAdapter.GetFootprintZPos( aFootprint->IsFlipped() );
+
+        VECTOR2I pos = aFootprint->GetPosition();
+
+        glm::mat4 fpMatrix( 1.0f );
+
+        fpMatrix = glm::translate( fpMatrix, SFVEC3F( pos.x * m_boardAdapter.BiuTo3dUnits(),
+                                                      -pos.y * m_boardAdapter.BiuTo3dUnits(), zpos ) );
+
+        if( !aFootprint->GetOrientation().IsZero() )
+        {
+            fpMatrix = glm::rotate( fpMatrix, (float) aFootprint->GetOrientation().AsRadians(),
+                                    SFVEC3F( 0.0f, 0.0f, 1.0f ) );
+        }
+
+        if( aFootprint->IsFlipped() )
+        {
+            fpMatrix = glm::rotate( fpMatrix, glm::pi<float>(), SFVEC3F( 0.0f, 1.0f, 0.0f ) );
+            fpMatrix = glm::rotate( fpMatrix, glm::pi<float>(), SFVEC3F( 0.0f, 0.0f, 1.0f ) );
+        }
+
+        double modelunit_to_3d_units_factor = m_boardAdapter.BiuTo3dUnits() * UNITS3D_TO_UNITSPCB;
+
+        fpMatrix = glm::scale( fpMatrix, SFVEC3F( modelunit_to_3d_units_factor ) );
+
+        renderPlaceholderForFootprint( aDstRenderList, fpMatrix, aFootprint, aRenderTransparentOnly, aIsSelected,
+                                       1.0f );
+    }
+}
+
+
+void RENDER_3D_OPENGL::renderPlaceholderForFootprint( std::list<MODELTORENDER>& aDstRenderList,
+                                                      const glm::mat4& aFpMatrix, const FOOTPRINT* aFootprint,
+                                                      bool aRenderTransparentOnly, bool aIsSelected, float aOpacity )
+{
+    if( !m_boardAdapter.m_Cfg->m_Render.show_missing_models || !m_placeholderModel )
+        return;
+
+    BOX2I localBox = CalcPlaceholderLocalBox( aFootprint );
+
+    float bboxW = std::abs( localBox.GetWidth() ) / pcbIUScale.IU_PER_MM * 0.9f;
+    float bboxH = std::abs( localBox.GetHeight() ) / pcbIUScale.IU_PER_MM * 0.9f;
+
+    float scaleX = bboxW;
+    float scaleY = bboxH;
+    float scaleZ = std::min( bboxW, bboxH ) * 0.5f;
+
+    VECTOR2I localCenter = localBox.GetCenter();
+    float    offsetX = localCenter.x / pcbIUScale.IU_PER_MM;
+    float    offsetY = -localCenter.y / pcbIUScale.IU_PER_MM;
+    float    offsetZ = scaleZ * 0.5f;
+
+    if( aFootprint->IsFlipped() )
+        offsetY = -offsetY;
+
+    glm::mat4 mtx = aFpMatrix;
+    mtx = glm::translate( mtx, SFVEC3F( offsetX, offsetY, offsetZ ) );
+    mtx = glm::scale( mtx, SFVEC3F( scaleX, scaleY, scaleZ ) );
+
+    bool placeholderOpaque = aOpacity >= 1.0;
+
+    if( ( !aRenderTransparentOnly && m_placeholderModel->HasOpaqueMeshes() && placeholderOpaque )
+        || ( aRenderTransparentOnly && ( m_placeholderModel->HasTransparentMeshes() || !placeholderOpaque ) ) )
+    {
+        aDstRenderList.emplace_back( mtx, m_placeholderModel, aOpacity, aRenderTransparentOnly,
+                                     aFootprint->IsSelected() || aIsSelected );
     }
 }
 
@@ -1853,4 +1927,102 @@ void RENDER_3D_OPENGL::generate3dGrid( GRID3D_TYPE aGridType )
     glDisable( GL_BLEND );
 
     glEndList();
+}
+
+
+void RENDER_3D_OPENGL::createPlaceholderModel()
+{
+    // Unit cube: 1mm × 1mm × 1mm, centered at origin
+    static SFVEC3F positions[24] = { // +Z (top)
+                                     { -0.5f, -0.5f, 0.5f },
+                                     { 0.5f, -0.5f, 0.5f },
+                                     { 0.5f, 0.5f, 0.5f },
+                                     { -0.5f, 0.5f, 0.5f },
+
+                                     // -Z (bottom)
+                                     { -0.5f, 0.5f, -0.5f },
+                                     { 0.5f, 0.5f, -0.5f },
+                                     { 0.5f, -0.5f, -0.5f },
+                                     { -0.5f, -0.5f, -0.5f },
+
+                                     // +X
+                                     { 0.5f, -0.5f, -0.5f },
+                                     { 0.5f, 0.5f, -0.5f },
+                                     { 0.5f, 0.5f, 0.5f },
+                                     { 0.5f, -0.5f, 0.5f },
+
+                                     // -X
+                                     { -0.5f, -0.5f, 0.5f },
+                                     { -0.5f, 0.5f, 0.5f },
+                                     { -0.5f, 0.5f, -0.5f },
+                                     { -0.5f, -0.5f, -0.5f },
+
+                                     // +Y
+                                     { -0.5f, 0.5f, 0.5f },
+                                     { 0.5f, 0.5f, 0.5f },
+                                     { 0.5f, 0.5f, -0.5f },
+                                     { -0.5f, 0.5f, -0.5f },
+
+                                     // -Y
+                                     { -0.5f, -0.5f, -0.5f },
+                                     { 0.5f, -0.5f, -0.5f },
+                                     { 0.5f, -0.5f, 0.5f },
+                                     { -0.5f, -0.5f, 0.5f }
+    };
+
+    static SFVEC3F normals[24] = { // +Z
+                                   { 0, 0, 1 },
+                                   { 0, 0, 1 },
+                                   { 0, 0, 1 },
+                                   { 0, 0, 1 },
+                                   // -Z
+                                   { 0, 0, -1 },
+                                   { 0, 0, -1 },
+                                   { 0, 0, -1 },
+                                   { 0, 0, -1 },
+                                   // +X
+                                   { 1, 0, 0 },
+                                   { 1, 0, 0 },
+                                   { 1, 0, 0 },
+                                   { 1, 0, 0 },
+                                   // -X
+                                   { -1, 0, 0 },
+                                   { -1, 0, 0 },
+                                   { -1, 0, 0 },
+                                   { -1, 0, 0 },
+                                   // +Y
+                                   { 0, 1, 0 },
+                                   { 0, 1, 0 },
+                                   { 0, 1, 0 },
+                                   { 0, 1, 0 },
+                                   // -Y
+                                   { 0, -1, 0 },
+                                   { 0, -1, 0 },
+                                   { 0, -1, 0 },
+                                   { 0, -1, 0 }
+    };
+
+    static unsigned int indices[36] = {
+        0,  1,  2,  0,  2,  3,  // +Z
+        4,  5,  6,  4,  6,  7,  // -Z
+        8,  9,  10, 8,  10, 11, // +X
+        12, 13, 14, 12, 14, 15, // -X
+        16, 17, 18, 16, 18, 19, // +Y
+        20, 21, 22, 20, 22, 23  // -Y
+    };
+
+    static SMATERIAL material = {
+        SFVEC3F( 0.2f, 0.1f, 0.0f ), // ambient
+        SFVEC3F( 1.0f, 0.5f, 0.0f ), // diffuse
+        SFVEC3F( 0.0f, 0.0f, 0.0f ), // emissive
+        SFVEC3F( 0.1f, 0.1f, 0.1f ), // specular
+        0.1f,                        // shininess
+        0.4f                         // transparency
+    };
+
+    static SMESH mesh = { 24, positions, normals, nullptr, nullptr, 36, indices, 0 };
+
+    static S3DMODEL model = { 1, &mesh, 1, &material };
+
+    m_placeholderModel = new MODEL_3D( model, MATERIAL_MODE::NORMAL );
 }

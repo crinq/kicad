@@ -61,7 +61,6 @@
 #include <pgm_base.h>
 #include <design_block_library_adapter.h>
 #include <policy_keys.h>
-#include <python_scripting.h>
 #include <settings/common_settings.h>
 #include <settings/settings_manager.h>
 #include <string_utils.h>
@@ -75,7 +74,7 @@
 #ifdef KICAD_IPC_API
 #include <api/api_plugin_manager.h>
 #include <api/api_server.h>
-#include <python_manager.h>
+#include <api/python_manager.h>
 #endif
 
 #ifdef _MSC_VER
@@ -96,6 +95,7 @@ LANGUAGE_DESCR LanguagesList[] =
 {
     { wxLANGUAGE_DEFAULT,    ID_LANGUAGE_DEFAULT,    _( "Default" ),    false },
     { wxLANGUAGE_ARABIC,     ID_LANGUAGE_ARABIC,     wxT( "العربية" ), true },
+    { wxLANGUAGE_FARSI,      ID_LANGUAGE_FARSI,      wxT( "فارسی" ), true },
     { wxLANGUAGE_INDONESIAN, ID_LANGUAGE_INDONESIAN, wxT( "Bahasa Indonesia" ), true },
     { wxLANGUAGE_BULGARIAN,  ID_LANGUAGE_BULGARIAN,  wxT( "Български" ), true },
     { wxLANGUAGE_CATALAN,    ID_LANGUAGE_CATALAN,    wxT( "Català" ), true },
@@ -103,12 +103,15 @@ LANGUAGE_DESCR LanguagesList[] =
     { wxLANGUAGE_DANISH,     ID_LANGUAGE_DANISH,     wxT( "Dansk" ),    true },
     { wxLANGUAGE_GERMAN,     ID_LANGUAGE_GERMAN,     wxT( "Deutsch" ),  true },
     { wxLANGUAGE_GREEK,      ID_LANGUAGE_GREEK,      wxT( "Ελληνικά" ), true },
+    { wxLANGUAGE_ESTONIAN,   ID_LANGUAGE_ESTONIAN,   wxT( "Eesti" ),    true },
     { wxLANGUAGE_ENGLISH,    ID_LANGUAGE_ENGLISH,    wxT( "English" ),  true },
     { wxLANGUAGE_SPANISH,    ID_LANGUAGE_SPANISH,    wxT( "Español" ),  true },
     { wxLANGUAGE_SPANISH_MEXICAN, ID_LANGUAGE_SPANISH_MEXICAN,
       wxT( "Español (Latinoamericano)" ),  true },
     { wxLANGUAGE_FRENCH,     ID_LANGUAGE_FRENCH,     wxT( "Français" ), true },
     { wxLANGUAGE_HEBREW,     ID_LANGUAGE_HEBREW,     wxT( "עברית" ), true },
+    { wxLANGUAGE_HINDI,      ID_LANGUAGE_HINDI,      wxT( "हिन्दी" ), true },
+    { wxLANGUAGE_CROATIAN,   ID_LANGUAGE_CROATIAN,   wxT( "Hrvatski" ), true },
     { wxLANGUAGE_KOREAN,     ID_LANGUAGE_KOREAN,     wxT( "한국어"),       true },
     { wxLANGUAGE_ITALIAN,    ID_LANGUAGE_ITALIAN,    wxT( "Italiano" ), true },
     { wxLANGUAGE_LATVIAN,    ID_LANGUAGE_LATVIAN,    wxT( "Latviešu" ), true },
@@ -117,6 +120,7 @@ LANGUAGE_DESCR LanguagesList[] =
     { wxLANGUAGE_DUTCH,      ID_LANGUAGE_DUTCH,      wxT( "Nederlands" ), true },
     { wxLANGUAGE_NORWEGIAN_BOKMAL, ID_LANGUAGE_NORWEGIAN_BOKMAL, wxT( "Norsk Bokmål" ), true },
     { wxLANGUAGE_JAPANESE,   ID_LANGUAGE_JAPANESE,   wxT( "日本語" ),    true },
+    { wxLANGUAGE_GEORGIAN,   ID_LANGUAGE_GEORGIAN,   wxT( "ქართული" ), true },
     { wxLANGUAGE_THAI,       ID_LANGUAGE_THAI,       wxT( "ภาษาไทย" ),    true },
     { wxLANGUAGE_POLISH,     ID_LANGUAGE_POLISH,     wxT( "Polski" ),   true },
     { wxLANGUAGE_PORTUGUESE, ID_LANGUAGE_PORTUGUESE, wxT( "Português" ),true },
@@ -131,6 +135,7 @@ LANGUAGE_DESCR LanguagesList[] =
     { wxLANGUAGE_SWEDISH,    ID_LANGUAGE_SWEDISH,    wxT( "Svenska" ),  true },
     { wxLANGUAGE_VIETNAMESE, ID_LANGUAGE_VIETNAMESE, wxT( "Tiếng Việt" ), true },
     { wxLANGUAGE_TAMIL,      ID_LANGUAGE_TAMIL,      wxT( "தமிழ்" ), true },
+    { wxLANGUAGE_TELUGU,     ID_LANGUAGE_TELUGU,     wxT( "తెలుగు" ), true },
     { wxLANGUAGE_TURKISH,    ID_LANGUAGE_TURKISH,    wxT( "Türkçe" ),   true },
     { wxLANGUAGE_UKRAINIAN,  ID_LANGUAGE_UKRAINIAN,   wxT( "Українська" ),   true },
     { wxLANGUAGE_CHINESE_SIMPLIFIED, ID_LANGUAGE_CHINESE_SIMPLIFIED,
@@ -319,7 +324,7 @@ void PGM_BASE::HideSplash()
 }
 
 
-bool PGM_BASE::InitPgm( bool aHeadless, bool aSkipPyInit, bool aIsUnitTest )
+bool PGM_BASE::InitPgm( bool aHeadless, bool aIsUnitTest )
 {
 #if defined( __WXMAC__ )
     // Set the application locale to the system default
@@ -469,11 +474,6 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aSkipPyInit, bool aIsUnitTest )
 
     GetNotificationsManager().Load();
 
-    // Create the python scripting stuff
-    // Skip it for applications that do not use it
-    if( !aSkipPyInit )
-        m_python_scripting = std::make_unique<SCRIPTING>();
-
     // TODO(JE): Remove this if apps are refactored to not assume Prj() always works
     // Need to create a project early for now (it can have an empty path for the moment)
     GetSettingsManager().LoadProject( "" );
@@ -533,7 +533,7 @@ void PGM_BASE::SaveCommonSettings()
 {
     // GetCommonSettings() is not initialized until fairly late in the
     // process startup: InitPgm(), so test before using:
-    if( GetCommonSettings() )
+    if( GetCommonSettings() && IsGUI() )
         GetCommonSettings()->m_System.working_dir = wxGetCwd();
 }
 

@@ -86,7 +86,6 @@ target_link_libraries( qa_spice
 PRIVATE
     eeschema_kiface_objects
     common
-    scripting
     kimath
     qa_utils
     qa_schematic_utils

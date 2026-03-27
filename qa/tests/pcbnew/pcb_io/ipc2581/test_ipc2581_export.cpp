@@ -125,6 +125,8 @@ static const std::vector<std::string> VALIDATION_TEST_BOARDS = {
     "issue7241.kicad_pcb",
     "issue10906.kicad_pcb",
     "issue22798.kicad_pcb",
+    "padstacks_complex.kicad_pcb",
+    "issue12609.kicad_pcb",
 };
 
 } // anonymous namespace
@@ -515,6 +517,124 @@ BOOST_AUTO_TEST_CASE( SmdPadSolderMaskExport_Issue16658 )
     // Also check for LayerFeature element with mask layer reference
     bool hasLayerFeature = FileContainsPattern( tempPath, wxT( "<LayerFeature" ) );
     BOOST_CHECK_MESSAGE( hasLayerFeature, "IPC-2581 export should contain LayerFeature elements" );
+}
+
+
+/**
+ * Test that footprints with empty references produce valid XML attributes.
+ *
+ * Footprints with blank GetReference() must not produce empty refDes,
+ * RefDes/@name, or PinRef/@componentRef attributes, which are
+ * schema-invalid qualified names.
+ */
+BOOST_AUTO_TEST_CASE( EmptyRefDesProducesValidXml )
+{
+    std::unique_ptr<BOARD> board = LoadBoard( "padstacks_complex.kicad_pcb" );
+    BOOST_REQUIRE( board );
+
+    for( char version : { 'B', 'C' } )
+    {
+        BOOST_TEST_CONTEXT( "Version " << version )
+        {
+            wxString tempPath = CreateTempFile();
+
+            std::map<std::string, UTF8> props;
+            props["units"] = "mm";
+            props["version"] = std::string( 1, version );
+            props["sigfig"] = "3";
+
+            m_ipc2581Plugin.SaveBoard( tempPath, board.get(), &props );
+            BOOST_REQUIRE( wxFileExists( tempPath ) );
+
+            BOOST_CHECK_MESSAGE( !FileContainsPattern( tempPath, wxT( "refDes=\"\"" ) ),
+                                 "Empty refDes attribute found" );
+            BOOST_CHECK_MESSAGE( !FileContainsPattern( tempPath, wxT( "<RefDes name=\"\"" ) ),
+                                 "Empty RefDes/@name attribute found" );
+            BOOST_CHECK_MESSAGE( !FileContainsPattern( tempPath, wxT( "componentRef=\"\"" ) ),
+                                 "Empty PinRef/@componentRef attribute found" );
+        }
+
+        m_ipc2581Plugin = PCB_IO_IPC2581();
+    }
+}
+
+
+/**
+ * Test that flipped component rotation is not inverted (Finding A / Issue #18013)
+ *
+ * IPC-2581C 3.3.2 defines positive rotation as CCW from board top.
+ * mirror="true" handles the X-axis negation for bottom components.
+ * The component rotation must be the normalized board-top angle,
+ * NOT its inverse.
+ */
+BOOST_AUTO_TEST_CASE( FlippedComponentRotation )
+{
+    std::unique_ptr<BOARD> board = LoadBoard( "issue12609.kicad_pcb" );
+    BOOST_REQUIRE( board );
+
+    wxString tempPath = CreateTempFile();
+
+    std::map<std::string, UTF8> props;
+    props["units"] = "mm";
+    props["version"] = "C";
+    props["sigfig"] = "3";
+
+    m_ipc2581Plugin.SaveBoard( tempPath, board.get(), &props );
+    BOOST_REQUIRE( wxFileExists( tempPath ) );
+
+    // C5 is on B.Cu at 90 degrees. Its Component Xform must be rotation="90.0",
+    // not the inverted "270.0". Check by finding Component refDes="C5" and verifying
+    // its Xform has rotation="90.0".
+    std::ifstream xmlFile( tempPath.ToStdString() );
+    BOOST_REQUIRE( xmlFile.is_open() );
+
+    std::string xmlContent( ( std::istreambuf_iterator<char>( xmlFile ) ),
+                            std::istreambuf_iterator<char>() );
+
+    // Find the C5 component and check its rotation
+    size_t c5Pos = xmlContent.find( "refDes=\"C5\"" );
+
+    if( c5Pos == std::string::npos )
+        c5Pos = xmlContent.find( "refDes=\"NOREF_" );
+
+    BOOST_REQUIRE_MESSAGE( c5Pos != std::string::npos,
+                           "C5 component should exist in export" );
+
+    // Look for the Xform within the next 200 chars after refDes="C5"
+    std::string c5Region = xmlContent.substr( c5Pos, 200 );
+    BOOST_CHECK_MESSAGE( c5Region.find( "rotation=\"90.0\"" ) != std::string::npos
+                         || c5Region.find( "rotation=\"90.00\"" ) != std::string::npos,
+                         "C5 component rotation should be 90, not inverted. Region: "
+                         + c5Region );
+}
+
+
+/**
+ * Test that Content section includes BomRef when BOM is emitted
+ */
+BOOST_AUTO_TEST_CASE( ContentBomRef )
+{
+    std::unique_ptr<BOARD> board = LoadBoard( "issue12609.kicad_pcb" );
+    BOOST_REQUIRE( board );
+
+    wxString tempPath = CreateTempFile();
+
+    std::map<std::string, UTF8> props;
+    props["units"] = "mm";
+    props["version"] = "C";
+    props["sigfig"] = "3";
+
+    m_ipc2581Plugin.SaveBoard( tempPath, board.get(), &props );
+    BOOST_REQUIRE( wxFileExists( tempPath ) );
+
+    bool hasBom = FileContainsPattern( tempPath, wxT( "<Bom " ) );
+    bool hasBomRef = FileContainsPattern( tempPath, wxT( "<BomRef " ) );
+
+    if( hasBom )
+    {
+        BOOST_CHECK_MESSAGE( hasBomRef,
+                             "Content should have BomRef when Bom section is present" );
+    }
 }
 
 
