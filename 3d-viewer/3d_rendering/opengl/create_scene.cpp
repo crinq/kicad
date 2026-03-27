@@ -1015,6 +1015,42 @@ void RENDER_3D_OPENGL::reload( REPORTER* aStatusReporter, REPORTER* aWarningRepo
             m_areaOuterThroughHoles[areaIdx] = generateHoles( objList, areaPoly,
                                                                1.0f, 0.0f, false );
         }
+
+        // Split via annuli rings per area (used for silk layer clipping)
+        if( m_boardAdapter.m_Cfg->m_Render.clip_silk_on_via_annuli )
+        {
+            const LIST_OBJECT2D& annuliObjects = m_boardAdapter.GetViaAnnuli().GetList();
+            std::map<int, LIST_OBJECT2D> areaAnnuliObjects;
+
+            for( OBJECT_2D* obj : annuliObjects )
+            {
+                SFVEC2F centroid = obj->GetCentroid();
+                VECTOR2I biuPos( (int)( centroid.x / biuScale ),
+                                 (int)( -centroid.y / biuScale ) );
+                int areaIdx = FindMultiPcbArea( areas, biuPos );
+                areaAnnuliObjects[areaIdx].push_back( obj );
+            }
+
+            for( auto& [areaIdx, objList] : areaAnnuliObjects )
+            {
+                if( objList.empty() )
+                    continue;
+
+                SHAPE_POLY_SET areaPoly =
+                        m_boardAdapter.GetViaAnnuliPolys().CloneDropTriangulation();
+
+                if( areaIdx >= 0 )
+                    areaPoly.BooleanIntersection( areas[areaIdx].outline );
+                else
+                {
+                    for( const auto& area : areas )
+                        areaPoly.BooleanSubtract( area.outline );
+                }
+
+                m_areaOuterThroughHoleRings[areaIdx] = generateHoles( objList, areaPoly,
+                                                                       1.0f, 0.0f, false );
+            }
+        }
     }
 
     const MAP_POLY& innerMapHoles = m_boardAdapter.GetHoleIdPolysMap();
@@ -1848,8 +1884,22 @@ void RENDER_3D_OPENGL::generateViaCovers( float aPlatingThickness3d, float aUnit
     if( !m_boardAdapter.GetBoard() || m_boardAdapter.GetViaCount() <= 0 )
         return;
 
-    TRIANGLE_DISPLAY_LIST* frontCover = new TRIANGLE_DISPLAY_LIST( m_boardAdapter.GetViaCount() );
-    TRIANGLE_DISPLAY_LIST* backCover = new TRIANGLE_DISPLAY_LIST( m_boardAdapter.GetViaCount() );
+    const bool perArea = m_hasPerAreaGeometry;
+    const auto& areas = m_boardAdapter.GetMultiPcbAreas();
+
+    // Per-area triangle lists (only used when perArea is true)
+    std::map<int, TRIANGLE_DISPLAY_LIST*> areaFrontCovers;
+    std::map<int, TRIANGLE_DISPLAY_LIST*> areaBackCovers;
+
+    // Global triangle lists (only used when perArea is false)
+    TRIANGLE_DISPLAY_LIST* frontCover = nullptr;
+    TRIANGLE_DISPLAY_LIST* backCover = nullptr;
+
+    if( !perArea )
+    {
+        frontCover = new TRIANGLE_DISPLAY_LIST( m_boardAdapter.GetViaCount() );
+        backCover = new TRIANGLE_DISPLAY_LIST( m_boardAdapter.GetViaCount() );
+    }
 
     for( const PCB_TRACK* track : m_boardAdapter.GetBoard()->Tracks() )
     {
@@ -1894,31 +1944,70 @@ void RENDER_3D_OPENGL::generateViaCovers( float aPlatingThickness3d, float aUnit
 
         const float depth = hole_radius * 0.3f;
 
+        // Determine which area this via belongs to
+        TRIANGLE_DISPLAY_LIST* fc = frontCover;
+        TRIANGLE_DISPLAY_LIST* bc = backCover;
+
+        if( perArea )
+        {
+            int areaIdx = FindMultiPcbArea( areas, via->GetStart() );
+
+            if( areaFrontCovers.find( areaIdx ) == areaFrontCovers.end() )
+                areaFrontCovers[areaIdx] = new TRIANGLE_DISPLAY_LIST( 64 );
+
+            if( areaBackCovers.find( areaIdx ) == areaBackCovers.end() )
+                areaBackCovers[areaIdx] = new TRIANGLE_DISPLAY_LIST( 64 );
+
+            fc = areaFrontCovers[areaIdx];
+            bc = areaBackCovers[areaIdx];
+        }
+
         if( frontCovering && !hasFrontPostMachining && !hasFrontBackdrill )
         {
             if( filled || !frontPlugged )
-                generateDisk( center, hole_radius, ztop, seg, frontCover, true );
+                generateDisk( center, hole_radius, ztop, seg, fc, true );
             else
-                generateDimple( center, hole_radius, ztop, depth, seg, frontCover, true );
+                generateDimple( center, hole_radius, ztop, depth, seg, fc, true );
         }
 
         if( backCovering && !hasBackPostMachining && !hasBackBackdrill )
         {
             if( filled || !backPlugged )
-                generateDisk( center, hole_radius, zbot, seg, backCover, false );
+                generateDisk( center, hole_radius, zbot, seg, bc, false );
             else
-                generateDimple( center, hole_radius, zbot, depth, seg, backCover, false );
+                generateDimple( center, hole_radius, zbot, depth, seg, bc, false );
         }
     }
 
-    if( frontCover->m_layer_top_triangles->GetVertexSize() > 0 )
-        m_viaFrontCover = new OPENGL_RENDER_LIST( *frontCover, 0, 0.0f, 0.0f );
+    if( perArea )
+    {
+        for( auto& [areaIdx, triList] : areaFrontCovers )
+        {
+            if( triList->m_layer_top_triangles->GetVertexSize() > 0 )
+                m_areaViaFrontCover[areaIdx] = new OPENGL_RENDER_LIST( *triList, 0, 0.0f, 0.0f );
 
-    if( backCover->m_layer_bot_triangles->GetVertexSize() > 0 )
-        m_viaBackCover = new OPENGL_RENDER_LIST( *backCover, 0, 0.0f, 0.0f );
+            delete triList;
+        }
 
-    delete frontCover;
-    delete backCover;
+        for( auto& [areaIdx, triList] : areaBackCovers )
+        {
+            if( triList->m_layer_bot_triangles->GetVertexSize() > 0 )
+                m_areaViaBackCover[areaIdx] = new OPENGL_RENDER_LIST( *triList, 0, 0.0f, 0.0f );
+
+            delete triList;
+        }
+    }
+    else
+    {
+        if( frontCover->m_layer_top_triangles->GetVertexSize() > 0 )
+            m_viaFrontCover = new OPENGL_RENDER_LIST( *frontCover, 0, 0.0f, 0.0f );
+
+        if( backCover->m_layer_bot_triangles->GetVertexSize() > 0 )
+            m_viaBackCover = new OPENGL_RENDER_LIST( *backCover, 0, 0.0f, 0.0f );
+
+        delete frontCover;
+        delete backCover;
+    }
 }
 
 

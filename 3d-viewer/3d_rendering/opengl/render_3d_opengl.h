@@ -319,8 +319,11 @@ private:
     std::map<int, OPENGL_RENDER_LIST*> m_areaPlatedPadsFront;
     std::map<int, OPENGL_RENDER_LIST*> m_areaPlatedPadsBack;
     std::map<int, OPENGL_RENDER_LIST*> m_areaOuterThroughHoles;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaOuterThroughHoleRings;
     std::map<int, OPENGL_RENDER_LIST*> m_areaPadHoles;
     std::map<int, OPENGL_RENDER_LIST*> m_areaMicroviaHoles;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaViaFrontCover;
+    std::map<int, OPENGL_RENDER_LIST*> m_areaViaBackCover;
     bool m_hasPerAreaGeometry = false;
 };
 

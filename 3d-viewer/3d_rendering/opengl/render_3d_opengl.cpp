@@ -829,11 +829,19 @@ bool RENDER_3D_OPENGL::Redraw( bool aIsMoving, REPORTER* aStatusReporter,
 
                     if( !skipRenderHoles )
                     {
-                        if( isSilkLayer && cfg.clip_silk_on_via_annuli
-                            && m_outerThroughHoleRings )
-                            throughHolesOuter = m_outerThroughHoleRings;
+                        if( isSilkLayer && cfg.clip_silk_on_via_annuli )
+                        {
+                            auto ringIt = m_areaOuterThroughHoleRings.find( areaIdx );
+
+                            if( ringIt != m_areaOuterThroughHoleRings.end() )
+                                throughHolesOuter = ringIt->second;
+                            else
+                                throughHolesOuter = areaOuterTH;
+                        }
                         else
-                            throughHolesOuter = m_outerThroughHoles;
+                        {
+                            throughHolesOuter = areaOuterTH;
+                        }
                     }
 
                     if( isSilkLayer && cfg.show_off_board_silk )
@@ -1239,8 +1247,11 @@ void RENDER_3D_OPENGL::freeAllLists()
     DELETE_AND_FREE_MAP( m_areaPlatedPadsFront )
     DELETE_AND_FREE_MAP( m_areaPlatedPadsBack )
     DELETE_AND_FREE_MAP( m_areaOuterThroughHoles )
+    DELETE_AND_FREE_MAP( m_areaOuterThroughHoleRings )
     DELETE_AND_FREE_MAP( m_areaPadHoles )
     DELETE_AND_FREE_MAP( m_areaMicroviaHoles )
+    DELETE_AND_FREE_MAP( m_areaViaFrontCover )
+    DELETE_AND_FREE_MAP( m_areaViaBackCover )
 
     m_hasPerAreaGeometry = false;
 }
@@ -1302,6 +1313,28 @@ void RENDER_3D_OPENGL::renderSolderMaskLayer( PCB_LAYER_ID aLayerID, float aZPos
             areaBoard->SetItIsTransparent( true );
             areaBoard->DrawCulled( aShowThickness, areaMask, via_holes );
 
+            // Draw per-area via covers inside the transform block
+            if( aLayerID == F_Mask )
+            {
+                auto coverIt = m_areaViaFrontCover.find( areaIdx );
+
+                if( coverIt != m_areaViaFrontCover.end() && coverIt->second )
+                {
+                    coverIt->second->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
+                    coverIt->second->DrawTop();
+                }
+            }
+            else if( aLayerID == B_Mask )
+            {
+                auto coverIt = m_areaViaBackCover.find( areaIdx );
+
+                if( coverIt != m_areaViaBackCover.end() && coverIt->second )
+                {
+                    coverIt->second->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
+                    coverIt->second->DrawBot();
+                }
+            }
+
             if( areaIdx >= 0 )
                 glPopMatrix();
         };
@@ -1310,18 +1343,6 @@ void RENDER_3D_OPENGL::renderSolderMaskLayer( PCB_LAYER_ID aLayerID, float aZPos
 
         for( int i = 0; i < (int)areas.size(); i++ )
             renderAreaMask( i );
-
-        // Via covers are rendered globally (not split per area)
-        if( aLayerID == F_Mask && m_viaFrontCover )
-        {
-            m_viaFrontCover->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
-            m_viaFrontCover->DrawTop();
-        }
-        else if( aLayerID == B_Mask && m_viaBackCover )
-        {
-            m_viaBackCover->ApplyScalePosition( aZPos, 4 * nonCopperThickness );
-            m_viaBackCover->DrawBot();
-        }
     }
     else if( m_board )
     {
